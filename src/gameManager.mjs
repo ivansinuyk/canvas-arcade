@@ -5,6 +5,8 @@ import { SnakeGame } from "./games/snake.mjs";
 import { SudokuGame } from "./games/sudoku.mjs";
 import { RaycasterGame } from "./games/raycaster.mjs";
 import { Doom3DGame } from "./games/doom3d.mjs";
+import { ChessGame } from "./games/chess.mjs";
+import { BreakoutGame } from "./games/breakout.mjs";
 
 export class GameManager {
   constructor(canvas, statusEl) {
@@ -124,6 +126,22 @@ export class GameManager {
       case "doom3d":
         this.ctx = null;
         this.currentGame = new Doom3DGame(
+          this.canvas,
+          this.ctx,
+          this.setStatus.bind(this)
+        );
+        break;
+      case "chess":
+        this.ctx = this.canvas.getContext("2d");
+        this.currentGame = new ChessGame(
+          this.canvas,
+          this.ctx,
+          this.setStatus.bind(this)
+        );
+        break;
+      case "breakout":
+        this.ctx = this.canvas.getContext("2d");
+        this.currentGame = new BreakoutGame(
           this.canvas,
           this.ctx,
           this.setStatus.bind(this)

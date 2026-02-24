@@ -1,5 +1,4 @@
-// Very simple WebGL 3D "Doom-like" room using vanilla WebGL.
-// WASD to move, mouse to look (after click), escape to release pointer.
+// Doom-style 3D game: full mouse look, multiple floors, enemies, weapons, pickups, HUD.
 
 export class Doom3DGame {
   constructor(canvas, _ctx2d, setStatus) {
@@ -10,21 +9,40 @@ export class Doom3DGame {
     this.program = null;
     this.buffers = null;
 
-    // Camera state
+    // Camera
     this.camX = 0;
     this.camY = 1.0;
     this.camZ = 4;
-    this.yaw = 0; // rotation around Y
+    this.yaw = 0;
+    this.pitch = 0; // vertical look (radians)
+    this.moveSpeed = 4.5;
+    this.mouseSensitivity = 0.0022;
+    this.maxPitch = (85 * Math.PI) / 180;
 
-    this.moveSpeed = 4.0;
-    this.mouseSensitivity = 0.0025;
+    // Player
+    this.playerHp = 100;
+    this.maxHp = 100;
+    this.weapons = [
+      { name: "Pistol", damage: 28, cooldown: 0.35 },
+      { name: "Shotgun", damage: 65, cooldown: 0.9 },
+      { name: "Chaingun", damage: 18, cooldown: 0.12 },
+    ];
+    this.ownedWeapons = [0]; // indices: start with pistol
+    this.currentWeaponIndex = 0;
+    this.shootCooldown = 0;
+
+    // World
+    this.enemies = [];
+    this.pickups = []; // { type: 'health'|'weapon', value, x,y,z, collected }
+    this.enemyTypes = [
+      { name: "Imp", hp: 60, speed: 1.2, color: [0.9, 0.25, 0.2], damage: 8 },
+      { name: "Zombie", hp: 90, speed: 0.9, color: [0.2, 0.6, 0.3], damage: 12 },
+      { name: "Demon", hp: 130, speed: 1.6, color: [0.5, 0.2, 0.6], damage: 15 },
+    ];
 
     this.gameOver = false;
     this.autoRestart = false;
-
-    this.setStatus(
-      "Doom3D: Click to lock mouse, move with WASD, Esc to release."
-    );
+    this.setStatus("Doom3D: Click to lock mouse. WASD move, 1-3 weapons, mouse look & shoot.");
   }
 
   reset() {
@@ -32,19 +50,75 @@ export class Doom3DGame {
     this.camY = 1.0;
     this.camZ = 4;
     this.yaw = 0;
+    this.pitch = 0;
+    this.playerHp = this.maxHp;
+    this.ownedWeapons = [0];
+    this.currentWeaponIndex = 0;
+    this.shootCooldown = 0;
     this.gameOver = false;
+    this.spawnEnemies();
+    this.spawnPickups();
+    this.setStatus("Doom3D: WASD move, 1-3 weapons, mouse look & shoot. Find health & weapons.");
+  }
 
-    this.setStatus(
-      "Doom3D: Click to lock mouse, move with WASD, Esc to release."
-    );
+  spawnEnemies() {
+    this.enemies = [];
+    const positions = [
+      [3, 0, 2], [-3, 0, -2], [0, 0, -4], [-4, 0, 3], [4, 0, -3],
+      [2, 1.5, 2], [-2, 1.5, -1], // upper floor
+    ];
+    positions.forEach(([x, y, z], i) => {
+      const type = i % this.enemyTypes.length;
+      const et = this.enemyTypes[type];
+      this.enemies.push({
+        x, y, z,
+        hp: et.hp,
+        maxHp: et.hp,
+        type,
+        color: et.color.slice(),
+        damage: et.damage,
+        speed: et.speed,
+      });
+    });
+  }
+
+  spawnPickups() {
+    this.pickups = [
+      { type: "health", value: 25, x: 2.5, y: 0, z: -3, collected: false },
+      { type: "health", value: 25, x: -3, y: 0, z: 2, collected: false },
+      { type: "health", value: 50, x: 0, y: 1.5, z: 2.5, collected: false },
+      { type: "weapon", value: 1, x: -4, y: 0, z: -3, collected: false },
+      { type: "weapon", value: 2, x: 4, y: 1.5, z: 1, collected: false },
+    ];
+  }
+
+  getFloorHeight(x, z) {
+    const half = 6;
+    if (x < -half || x > half || z < -half || z > half) return 0;
+    if (x >= -1 && x <= 1 && z >= -2 && z <= 0) return 0.2 + (z + 2) / 2 * 1.3;
+    if (x >= -5 && x <= -2 && z >= 2 && z <= 5) return 1.5;
+    if (x >= 2 && x <= 5 && z >= -1 && z <= 2) return 1.5;
+    return 0;
+  }
+
+  isWallOrPillar(x, z, margin = 0.25) {
+    const half = 6;
+    if (x < -half + margin || x > half - margin || z < -half + margin || z > half - margin) return true;
+    const pillars = [[-2.5, -1.5], [2, 1.8], [0, 0], [-4, 3.5], [4, -2.5]];
+    for (const [cx, cz] of pillars) {
+      if (Math.abs(x - cx) < 0.6 + margin && Math.abs(z - cz) < 0.6 + margin) return true;
+    }
+    return false;
   }
 
   onKeyDown(e) {
     if (e.code === "Escape") {
-      if (document.pointerLockElement === this.canvas) {
-        document.exitPointerLock?.();
-      }
+      if (document.pointerLockElement === this.canvas) document.exitPointerLock?.();
+      return;
     }
+    if (e.code === "Digit1" && this.ownedWeapons.includes(0)) this.currentWeaponIndex = 0;
+    if (e.code === "Digit2" && this.ownedWeapons.includes(1)) this.currentWeaponIndex = 1;
+    if (e.code === "Digit3" && this.ownedWeapons.includes(2)) this.currentWeaponIndex = 2;
   }
 
   onKeyUp() {}
@@ -52,346 +126,355 @@ export class Doom3DGame {
   onMouseMove(e) {
     if (document.pointerLockElement !== this.canvas) return;
     const dx = e.movementX || 0;
+    const dy = e.movementY || 0;
     this.yaw += dx * this.mouseSensitivity;
+    this.pitch -= dy * this.mouseSensitivity;
+    if (this.pitch > this.maxPitch) this.pitch = this.maxPitch;
+    if (this.pitch < -this.maxPitch) this.pitch = -this.maxPitch;
   }
 
   onMouseDown(e) {
-    if (e.button === 0 && document.pointerLockElement !== this.canvas) {
-      this.canvas.requestPointerLock?.();
+    if (e.button !== 0) return;
+    if (this.gameOver) {
+      this.reset();
+      return;
+    }
+    if (document.pointerLockElement !== this.canvas) this.canvas.requestPointerLock?.();
+    this.tryShoot();
+  }
+
+  tryShoot() {
+    if (this.shootCooldown > 0 || this.gameOver) return;
+    const w = this.weapons[this.currentWeaponIndex];
+    if (!w) return;
+    this.shootCooldown = w.cooldown;
+
+    const sinY = Math.sin(this.yaw);
+    const cosY = Math.cos(this.yaw);
+    const sinP = Math.sin(this.pitch);
+    const cosP = Math.cos(this.pitch);
+    const dirX = sinY * cosP;
+    const dirY = -sinP;
+    const dirZ = -cosY * cosP;
+
+    let bestT = Infinity;
+    let hitEnemy = null;
+    for (const e of this.enemies) {
+      if (e.hp <= 0) continue;
+      const dx = e.x - this.camX;
+      const dy = (e.y + 0.5) - this.camY;
+      const dz = e.z - this.camZ;
+      const t = (dx * dirX + dy * dirY + dz * dirZ) / (dirX * dirX + dirY * dirY + dirZ * dirZ);
+      if (t < 0.1) continue;
+      const px = this.camX + dirX * t;
+      const py = this.camY + dirY * t;
+      const pz = this.camZ + dirZ * t;
+      const dist = Math.abs(px - e.x) + Math.abs(py - (e.y + 0.5)) + Math.abs(pz - e.z);
+      if (dist < 1.2 && t < bestT) {
+        bestT = t;
+        hitEnemy = e;
+      }
+    }
+    if (hitEnemy) {
+      hitEnemy.hp -= w.damage;
+      if (hitEnemy.hp <= 0) hitEnemy.hp = 0;
     }
   }
 
   update(dt, keyState) {
     if (this.gameOver) return;
 
-    const forward =
-      keyState.has("KeyW") || keyState.has("ArrowUp");
-    const backward =
-      keyState.has("KeyS") || keyState.has("ArrowDown");
+    if (this.shootCooldown > 0) this.shootCooldown -= dt;
+
+    const forward = keyState.has("KeyW") || keyState.has("ArrowUp");
+    const backward = keyState.has("KeyS") || keyState.has("ArrowDown");
     const left = keyState.has("KeyA");
     const right = keyState.has("KeyD");
 
     const sinYaw = Math.sin(this.yaw);
     const cosYaw = Math.cos(this.yaw);
-
-    let vx = 0;
-    let vz = 0;
-
-    if (forward) {
-      vx += sinYaw;
-      vz += -cosYaw;
-    }
-    if (backward) {
-      vx -= sinYaw;
-      vz -= -cosYaw;
-    }
-    if (left) {
-      vx += -cosYaw;
-      vz += -sinYaw;
-    }
-    if (right) {
-      vx -= -cosYaw;
-      vz -= -sinYaw;
-    }
+    let vx = 0, vz = 0;
+    if (forward) { vx += sinYaw; vz += -cosYaw; }
+    if (backward) { vx -= sinYaw; vz -= -cosYaw; }
+    if (left) { vx += -cosYaw; vz += -sinYaw; }
+    if (right) { vx -= -cosYaw; vz -= -sinYaw; }
 
     const len = Math.hypot(vx, vz);
-    if (len > 0.0001) {
-      vx /= len;
-      vz /= len;
+    if (len > 1e-5) {
+      vx /= len; vz /= len;
       const step = this.moveSpeed * dt;
-      this.camX += vx * step;
-      this.camZ += vz * step;
+      let nx = this.camX + vx * step;
+      let nz = this.camZ + vz * step;
+      if (!this.isWallOrPillar(nx, this.camZ)) this.camX = nx;
+      if (!this.isWallOrPillar(this.camX, nz)) this.camZ = nz;
+    }
+
+    this.camY = this.getFloorHeight(this.camX, this.camZ) + 1.0;
+
+    for (const p of this.pickups) {
+      if (p.collected) continue;
+      const dx = p.x - this.camX, dz = p.z - this.camZ;
+      if (dx * dx + dz * dz < 0.8) {
+        p.collected = true;
+        if (p.type === "health") this.playerHp = Math.min(this.maxHp, this.playerHp + p.value);
+        if (p.type === "weapon" && !this.ownedWeapons.includes(p.value)) this.ownedWeapons.push(p.value);
+      }
+    }
+
+    for (const e of this.enemies) {
+      if (e.hp <= 0) continue;
+      const dx = this.camX - e.x, dz = this.camZ - e.z;
+      const dist = Math.hypot(dx, dz);
+      if (dist < 0.5) {
+        this.playerHp -= e.damage * dt * 2;
+        if (this.playerHp <= 0) {
+          this.playerHp = 0;
+          this.gameOver = true;
+          this.setStatus("Doom3D: You died. Click to restart.");
+        }
+        continue;
+      }
+      if (dist < 0.01) continue;
+      const step = e.speed * dt;
+      let nx = e.x + (dx / dist) * step;
+      let nz = e.z + (dz / dist) * step;
+      if (!this.isWallOrPillar(nx, e.z)) e.x = nx;
+      if (!this.isWallOrPillar(e.x, nz)) e.z = nz;
+      e.y = this.getFloorHeight(e.x, e.z);
+    }
+
+    const alive = this.enemies.filter((e) => e.hp > 0).length;
+    if (!this.gameOver) {
+      const w = this.weapons[this.currentWeaponIndex];
+      this.setStatus(
+        `HP ${Math.round(this.playerHp)} | ${w ? w.name : ""} | Enemies ${alive} | 1-3 switch weapon`
+      );
     }
   }
 
   ensureGl() {
     if (this.gl) return;
-
-    // Try several context names for maximum compatibility
-    let gl =
-      this.canvas.getContext("webgl") ||
-      this.canvas.getContext("experimental-webgl") ||
-      this.canvas.getContext("webgl2");
+    let gl = this.canvas.getContext("webgl") || this.canvas.getContext("experimental-webgl") || this.canvas.getContext("webgl2");
     if (!gl) {
-      this.setStatus(
-        "Doom3D: WebGL context could not be created. This browser or device may not support hardware-accelerated 3D."
-      );
+      this.setStatus("Doom3D: WebGL not supported.");
       this.gameOver = true;
       return;
     }
     this.gl = gl;
 
-    const vsSource = `
-      attribute vec3 aPosition;
-      attribute vec3 aColor;
-      uniform mat4 uProjection;
-      uniform mat4 uView;
-      varying vec3 vColor;
-      void main() {
-        gl_Position = uProjection * uView * vec4(aPosition, 1.0);
-        vColor = aColor;
-      }
-    `;
-
-    const fsSource = `
-      precision mediump float;
-      varying vec3 vColor;
-      void main() {
-        gl_FragColor = vec4(vColor, 1.0);
-      }
-    `;
-
-    const vertShader = this.createShader(gl, gl.VERTEX_SHADER, vsSource);
-    const fragShader = this.createShader(gl, gl.FRAGMENT_SHADER, fsSource);
-    this.program = this.createProgram(gl, vertShader, fragShader);
-
+    const vs = `attribute vec3 aPosition; attribute vec3 aColor; uniform mat4 uProjection; uniform mat4 uView; varying vec3 vColor;
+      void main() { gl_Position = uProjection * uView * vec4(aPosition, 1.0); vColor = aColor; }`;
+    const fs = `precision mediump float; varying vec3 vColor; void main() { gl_FragColor = vec4(vColor, 1.0); }`;
+    const vsh = this.createShader(gl, gl.VERTEX_SHADER, vs);
+    const fsh = this.createShader(gl, gl.FRAGMENT_SHADER, fs);
+    this.program = this.createProgram(gl, vsh, fsh);
     this.buffers = this.createSceneBuffers(gl);
-
     gl.enable(gl.DEPTH_TEST);
   }
 
   createShader(gl, type, source) {
-    const shader = gl.createShader(type);
-    gl.shaderSource(shader, source);
-    gl.compileShader(shader);
-    if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
-      console.error(gl.getShaderInfoLog(shader));
-      gl.deleteShader(shader);
-      return null;
-    }
-    return shader;
+    const s = gl.createShader(type);
+    gl.shaderSource(s, source);
+    gl.compileShader(s);
+    if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) console.error(gl.getShaderInfoLog(s));
+    return s;
   }
 
   createProgram(gl, vs, fs) {
-    const program = gl.createProgram();
-    gl.attachShader(program, vs);
-    gl.attachShader(program, fs);
-    gl.linkProgram(program);
-    if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
-      console.error(gl.getProgramInfoLog(program));
-      gl.deleteProgram(program);
-      return null;
-    }
-    return program;
+    const p = gl.createProgram();
+    gl.attachShader(p, vs);
+    gl.attachShader(p, fs);
+    gl.linkProgram(p);
+    if (!gl.getProgramParameter(p, gl.LINK_STATUS)) console.error(gl.getProgramInfoLog(p));
+    return p;
+  }
+
+  addQuad(vertices, p1, p2, p3, p4, color) {
+    const [r, g, b] = color;
+    const push = (p) => vertices.push(p[0], p[1], p[2], r, g, b);
+    push(p1); push(p2); push(p3);
+    push(p1); push(p3); push(p4);
   }
 
   createSceneBuffers(gl) {
     const vertices = [];
+    const half = 6, floorY = 0, ceilY = 3;
+    const wall1 = [0.23, 0.34, 0.46], wall2 = [0.18, 0.25, 0.36];
+    const picColor = [0.6, 0.45, 0.25];
 
-    const addQuad = (p1, p2, p3, p4, color) => {
-      const [r, g, b] = color;
-      const pushVert = (p) => {
-        vertices.push(p[0], p[1], p[2], r, g, b);
-      };
-      // Triangle 1
-      pushVert(p1);
-      pushVert(p2);
-      pushVert(p3);
-      // Triangle 2
-      pushVert(p1);
-      pushVert(p3);
-      pushVert(p4);
+    this.addQuad(vertices,
+      [-half, floorY, -half], [half, floorY, -half], [half, floorY, half], [-half, floorY, half],
+      [0.12, 0.19, 0.25]);
+    this.addQuad(vertices,
+      [-half, ceilY, -half], [-half, ceilY, half], [half, ceilY, half], [half, ceilY, -half],
+      [0.05, 0.07, 0.12]);
+
+    this.addQuad(vertices, [-half, floorY, -half], [-half, ceilY, -half], [half, ceilY, -half], [half, floorY, -half], wall1);
+    this.addQuad(vertices, [-half, floorY, half], [half, floorY, half], [half, ceilY, half], [-half, ceilY, half], wall1);
+    this.addQuad(vertices, [-half, floorY, -half], [-half, floorY, half], [-half, ceilY, half], [-half, ceilY, -half], wall2);
+    this.addQuad(vertices, [half, floorY, -half], [half, ceilY, -half], [half, ceilY, half], [half, floorY, half], wall2);
+
+    this.addQuad(vertices, [-half, 1.2, -half + 0.01], [0, 1.2, -half + 0.01], [0, 2.4, -half + 0.01], [-half, 2.4, -half + 0.01], picColor);
+    this.addQuad(vertices, [0, 1.2, -half + 0.01], [half, 1.2, -half + 0.01], [half, 2.4, -half + 0.01], [0, 2.4, -half + 0.01], [0.3, 0.5, 0.6]);
+
+    const pillar = (cx, cz, size, height, color) => {
+      const s = size / 2, y0 = floorY, y1 = y0 + height;
+      this.addQuad(vertices, [cx - s, y0, cz + s], [cx + s, y0, cz + s], [cx + s, y1, cz + s], [cx - s, y1, cz + s], color);
+      this.addQuad(vertices, [cx - s, y0, cz - s], [cx - s, y1, cz - s], [cx + s, y1, cz - s], [cx + s, y0, cz - s], color);
+      this.addQuad(vertices, [cx - s, y0, cz - s], [cx - s, y0, cz + s], [cx - s, y1, cz + s], [cx - s, y1, cz - s], color);
+      this.addQuad(vertices, [cx + s, y0, cz - s], [cx + s, y1, cz - s], [cx + s, y1, cz + s], [cx + s, y0, cz + s], color);
     };
+    pillar(-2.5, -1.5, 1.2, 2.8, [0.45, 0.26, 0.55]);
+    pillar(2, 1.8, 1, 2.4, [0.45, 0.26, 0.55]);
+    pillar(0, 0, 1.4, 2.2, [0.4, 0.3, 0.5]);
 
-    // Room dimensions
-    const halfSize = 6;
-    const floorY = 0;
-    const ceilY = 3;
+    const rampY0 = 0.2, rampY1 = 1.5;
+    for (let z = -2; z <= 0; z += 0.5) {
+      const t = (z + 2) / 2;
+      const y = rampY0 + t * (rampY1 - rampY0);
+      this.addQuad(vertices, [-1, y, z], [1, y, z], [1, y, z + 0.5], [-1, y, z + 0.5], [0.15, 0.22, 0.3]);
+    }
+    this.addQuad(vertices, [-5, 1.5, 2], [5, 1.5, 2], [5, 1.5, 5], [-5, 1.5, 5], [0.14, 0.2, 0.28]);
+    this.addQuad(vertices, [2, 1.5, -1], [5, 1.5, -1], [5, 1.5, 2], [2, 1.5, 2], [0.14, 0.2, 0.28]);
+    pillar(-4, 3.5, 1, 1.5, [0.4, 0.3, 0.5]);
+    pillar(4, -2.5, 1, 1.5, [0.4, 0.3, 0.5]);
 
-    // Floor
-    addQuad(
-      [-halfSize, floorY, -halfSize],
-      [halfSize, floorY, -halfSize],
-      [halfSize, floorY, halfSize],
-      [-halfSize, floorY, halfSize],
-      [0.12, 0.19, 0.25]
-    );
-
-    // Ceiling
-    addQuad(
-      [-halfSize, ceilY, -halfSize],
-      [-halfSize, ceilY, halfSize],
-      [halfSize, ceilY, halfSize],
-      [halfSize, ceilY, -halfSize],
-      [0.05, 0.07, 0.12]
-    );
-
-    // Walls (front/back/left/right)
-    const wallColor1 = [0.23, 0.34, 0.46];
-    const wallColor2 = [0.18, 0.25, 0.36];
-
-    // Back wall (z = -halfSize)
-    addQuad(
-      [-halfSize, floorY, -halfSize],
-      [-halfSize, ceilY, -halfSize],
-      [halfSize, ceilY, -halfSize],
-      [halfSize, floorY, -halfSize],
-      wallColor1
-    );
-
-    // Front wall (z = halfSize)
-    addQuad(
-      [-halfSize, floorY, halfSize],
-      [halfSize, floorY, halfSize],
-      [halfSize, ceilY, halfSize],
-      [-halfSize, ceilY, halfSize],
-      wallColor1
-    );
-
-    // Left wall (x = -halfSize)
-    addQuad(
-      [-halfSize, floorY, -halfSize],
-      [-halfSize, floorY, halfSize],
-      [-halfSize, ceilY, halfSize],
-      [-halfSize, ceilY, -halfSize],
-      wallColor2
-    );
-
-    // Right wall (x = halfSize)
-    addQuad(
-      [halfSize, floorY, -halfSize],
-      [halfSize, ceilY, -halfSize],
-      [halfSize, ceilY, halfSize],
-      [halfSize, floorY, halfSize],
-      wallColor2
-    );
-
-    // A few inner "pillars" (just tall boxes with 4 sides)
-    const pillarColor = [0.45, 0.26, 0.55];
-    const addPillar = (cx, cz, size, height) => {
-      const s = size / 2;
-      const y0 = floorY;
-      const y1 = y0 + height;
-      // front
-      addQuad(
-        [cx - s, y0, cz + s],
-        [cx + s, y0, cz + s],
-        [cx + s, y1, cz + s],
-        [cx - s, y1, cz + s],
-        pillarColor
-      );
-      // back
-      addQuad(
-        [cx - s, y0, cz - s],
-        [cx - s, y1, cz - s],
-        [cx + s, y1, cz - s],
-        [cx + s, y0, cz - s],
-        pillarColor
-      );
-      // left
-      addQuad(
-        [cx - s, y0, cz - s],
-        [cx - s, y0, cz + s],
-        [cx - s, y1, cz + s],
-        [cx - s, y1, cz - s],
-        pillarColor
-      );
-      // right
-      addQuad(
-        [cx + s, y0, cz - s],
-        [cx + s, y1, cz - s],
-        [cx + s, y1, cz + s],
-        [cx + s, y0, cz + s],
-        pillarColor
-      );
-    };
-
-    addPillar(-2.5, -1.5, 1.2, 2.8);
-    addPillar(2.0, 1.8, 1.0, 2.4);
-    addPillar(0.0, 0.0, 1.4, 2.2);
-
-    const vertexData = new Float32Array(vertices);
-
+    const data = new Float32Array(vertices);
     const vbo = gl.createBuffer();
     gl.bindBuffer(gl.ARRAY_BUFFER, vbo);
-    gl.bufferData(gl.ARRAY_BUFFER, vertexData, gl.STATIC_DRAW);
+    gl.bufferData(gl.ARRAY_BUFFER, data, gl.STATIC_DRAW);
+    return { vbo, vertexCount: data.length / 6 };
+  }
 
-    return {
-      vbo,
-      vertexCount: vertexData.length / 6,
-    };
+  drawBox(gl, program, view, proj, cx, cy, cz, size, color) {
+    const s = size / 2;
+    const verts = [];
+    this.addQuad(verts, [cx - s, cy - s, cz + s], [cx + s, cy - s, cz + s], [cx + s, cy + s, cz + s], [cx - s, cy + s, cz + s], color);
+    this.addQuad(verts, [cx - s, cy - s, cz - s], [cx - s, cy + s, cz - s], [cx + s, cy + s, cz - s], [cx + s, cy - s, cz - s], color);
+    this.addQuad(verts, [cx - s, cy - s, cz - s], [cx - s, cy - s, cz + s], [cx - s, cy + s, cz + s], [cx - s, cy + s, cz - s], color);
+    this.addQuad(verts, [cx + s, cy - s, cz - s], [cx + s, cy + s, cz - s], [cx + s, cy + s, cz + s], [cx + s, cy - s, cz + s], color);
+    this.addQuad(verts, [cx - s, cy + s, cz - s], [cx - s, cy + s, cz + s], [cx + s, cy + s, cz + s], [cx + s, cy + s, cz - s], color);
+    this.addQuad(verts, [cx - s, cy - s, cz - s], [cx + s, cy - s, cz - s], [cx + s, cy - s, cz + s], [cx - s, cy - s, cz + s], color);
+    const vbo = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, vbo);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(verts), gl.STATIC_DRAW);
+    const stride = 24;
+    gl.vertexAttribPointer(gl.getAttribLocation(program, "aPosition"), 3, gl.FLOAT, false, stride, 0);
+    gl.vertexAttribPointer(gl.getAttribLocation(program, "aColor"), 3, gl.FLOAT, false, stride, 12);
+    gl.uniformMatrix4fv(gl.getUniformLocation(program, "uProjection"), false, proj);
+    gl.uniformMatrix4fv(gl.getUniformLocation(program, "uView"), false, view);
+    gl.drawArrays(gl.TRIANGLES, 0, verts.length / 6);
+    gl.deleteBuffer(vbo);
+  }
+
+  buildViewMatrix() {
+    const sy = Math.sin(this.yaw), cy = Math.cos(this.yaw);
+    const sp = Math.sin(this.pitch), cp = Math.cos(this.pitch);
+    const fx = sy * cp, fy = -sp, fz = -cy * cp;
+    const rx = -cy * cp, ry = 0, rz = -sy * cp;
+    const ux = sy * sp, uy = cp, uz = -cy * sp;
+    const px = this.camX, py = this.camY, pz = this.camZ;
+    const v = new Float32Array(16);
+    v[0] = rx; v[1] = ux; v[2] = -fx; v[3] = 0;
+    v[4] = ry; v[5] = uy; v[6] = -fy; v[7] = 0;
+    v[8] = rz; v[9] = uz; v[10] = -fz; v[11] = 0;
+    v[12] = -(rx * px + ry * py + rz * pz);
+    v[13] = -(ux * px + uy * py + uz * pz);
+    v[14] = fx * px + fy * py + fz * pz;
+    v[15] = 1;
+    return v;
+  }
+
+  buildProjMatrix() {
+    const fov = (60 * Math.PI) / 180, aspect = this.canvas.width / this.canvas.height, near = 0.1, far = 100;
+    const f = 1 / Math.tan(fov / 2);
+    const p = new Float32Array(16);
+    p[0] = f / aspect; p[5] = f; p[10] = (far + near) / (near - far); p[11] = -1;
+    p[14] = (2 * far * near) / (near - far);
+    return p;
   }
 
   draw() {
     this.ensureGl();
     if (!this.gl || !this.program || !this.buffers) return;
 
-    const gl = this.gl;
-    const program = this.program;
-    const { vbo, vertexCount } = this.buffers;
-
+    const gl = this.gl, program = this.program;
     gl.viewport(0, 0, this.canvas.width, this.canvas.height);
-    gl.clearColor(0.01, 0.01, 0.02, 1.0);
+    gl.clearColor(0.02, 0.02, 0.04, 1);
     gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
 
+    const proj = this.buildProjMatrix();
+    const view = this.buildViewMatrix();
+
     gl.useProgram(program);
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.buffers.vbo);
+    const stride = 24;
+    gl.enableVertexAttribArray(gl.getAttribLocation(program, "aPosition"));
+    gl.vertexAttribPointer(gl.getAttribLocation(program, "aPosition"), 3, gl.FLOAT, false, stride, 0);
+    gl.enableVertexAttribArray(gl.getAttribLocation(program, "aColor"));
+    gl.vertexAttribPointer(gl.getAttribLocation(program, "aColor"), 3, gl.FLOAT, false, stride, 12);
+    gl.uniformMatrix4fv(gl.getUniformLocation(program, "uProjection"), false, proj);
+    gl.uniformMatrix4fv(gl.getUniformLocation(program, "uView"), false, view);
+    gl.drawArrays(gl.TRIANGLES, 0, this.buffers.vertexCount);
 
-    // Attributes
-    gl.bindBuffer(gl.ARRAY_BUFFER, vbo);
-    const stride = 6 * 4;
-    const aPosition = gl.getAttribLocation(program, "aPosition");
-    const aColor = gl.getAttribLocation(program, "aColor");
-    gl.enableVertexAttribArray(aPosition);
-    gl.vertexAttribPointer(aPosition, 3, gl.FLOAT, false, stride, 0);
-    gl.enableVertexAttribArray(aColor);
-    gl.vertexAttribPointer(aColor, 3, gl.FLOAT, false, stride, 3 * 4);
+    for (const e of this.enemies) {
+      if (e.hp <= 0) continue;
+      this.drawBox(gl, program, view, proj, e.x, e.y + 0.5, e.z, 0.5, e.color);
+      if (e.hp < e.maxHp) {
+        const t = e.hp / e.maxHp;
+        const barY = e.y + 1.1;
+        const verts = [];
+        this.addQuad(verts, [e.x - 0.3, barY, e.z + 0.26], [e.x + 0.3, barY, e.z + 0.26], [e.x + 0.3, barY + 0.06, e.z + 0.26], [e.x - 0.3, barY + 0.06, e.z + 0.26], [0.2, 0.2, 0.2]);
+        this.addQuad(verts, [e.x - 0.28, barY + 0.02, e.z + 0.27], [e.x - 0.28 + 0.56 * t, barY + 0.02, e.z + 0.27], [e.x - 0.28 + 0.56 * t, barY + 0.04, e.z + 0.27], [e.x - 0.28, barY + 0.04, e.z + 0.27], [0.2, 0.9, 0.2]);
+        const vbo = gl.createBuffer();
+        gl.bindBuffer(gl.ARRAY_BUFFER, vbo);
+        gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(verts), gl.STATIC_DRAW);
+        gl.vertexAttribPointer(gl.getAttribLocation(program, "aPosition"), 3, gl.FLOAT, false, 24, 0);
+        gl.vertexAttribPointer(gl.getAttribLocation(program, "aColor"), 3, gl.FLOAT, false, 24, 12);
+        gl.drawArrays(gl.TRIANGLES, 0, verts.length / 6);
+        gl.deleteBuffer(vbo);
+      }
+    }
 
-    // Projection matrix
-    const fov = (60 * Math.PI) / 180;
-    const aspect = this.canvas.width / this.canvas.height;
-    const near = 0.1;
-    const far = 100.0;
-    const proj = new Float32Array(16);
-    const f = 1.0 / Math.tan(fov / 2);
-    proj[0] = f / aspect;
-    proj[5] = f;
-    proj[10] = (far + near) / (near - far);
-    proj[11] = -1;
-    proj[14] = (2 * far * near) / (near - far);
-    proj[1] = proj[2] = proj[3] =
-      proj[4] = proj[6] = proj[7] = proj[8] = proj[9] = proj[12] = proj[13] = proj[15] = 0;
+    for (const p of this.pickups) {
+      if (p.collected) continue;
+      if (p.type === "health") this.drawBox(gl, program, view, proj, p.x, p.y + 0.2, p.z, 0.35, [0.2, 0.85, 0.3]);
+      if (p.type === "weapon") this.drawBox(gl, program, view, proj, p.x, p.y + 0.25, p.z, 0.3, [0.85, 0.7, 0.2]);
+    }
 
-    // View matrix (yaw + translation)
-    const sinYaw = Math.sin(this.yaw);
-    const cosYaw = Math.cos(this.yaw);
+    gl.disable(gl.DEPTH_TEST);
+    const ortho = new Float32Array(16);
+    ortho[0] = 2 / this.canvas.width; ortho[5] = -2 / this.canvas.height; ortho[10] = -1; ortho[12] = -1; ortho[13] = 1; ortho[15] = 1;
+    const identity = new Float32Array(16);
+    identity[0] = identity[5] = identity[10] = identity[15] = 1;
+    gl.uniformMatrix4fv(gl.getUniformLocation(program, "uProjection"), false, ortho);
+    gl.uniformMatrix4fv(gl.getUniformLocation(program, "uView"), false, identity);
 
-    // Camera basis
-    const fx = sinYaw;
-    const fz = -cosYaw;
-    const sx = cosYaw;
-    const sz = sinYaw;
-    const ux = 0;
-    const uy = 1;
-    const uz = 0;
+    const barW = 200, barH = 18, margin = 20;
+    const hudVerts = [];
+    this.addQuad(hudVerts, [margin, this.canvas.height - margin - barH, 0], [margin + barW, this.canvas.height - margin - barH, 0], [margin + barW, this.canvas.height - margin, 0], [margin, this.canvas.height - margin, 0], [0.15, 0.15, 0.15]);
+    const fillW = (this.playerHp / this.maxHp) * (barW - 4);
+    this.addQuad(hudVerts, [margin + 2, this.canvas.height - margin - barH + 2, 0], [margin + 2 + fillW, this.canvas.height - margin - barH + 2, 0], [margin + 2 + fillW, this.canvas.height - margin - 2, 0], [margin + 2, this.canvas.height - margin - 2, 0], [0.85, 0.2, 0.2]);
+    const hudVbo = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, hudVbo);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(hudVerts), gl.STATIC_DRAW);
+    gl.vertexAttribPointer(gl.getAttribLocation(program, "aPosition"), 3, gl.FLOAT, false, 24, 0);
+    gl.vertexAttribPointer(gl.getAttribLocation(program, "aColor"), 3, gl.FLOAT, false, 24, 12);
+    gl.drawArrays(gl.TRIANGLES, 0, hudVerts.length / 6);
+    gl.deleteBuffer(hudVbo);
 
-    const px = this.camX;
-    const py = this.camY;
-    const pz = this.camZ;
+    const crossSize = 4;
+    const cV = [];
+    this.addQuad(cV, [this.canvas.width / 2 - crossSize, this.canvas.height / 2 - 1, 0], [this.canvas.width / 2 + crossSize, this.canvas.height / 2 - 1, 0], [this.canvas.width / 2 + crossSize, this.canvas.height / 2 + 1, 0], [this.canvas.width / 2 - crossSize, this.canvas.height / 2 + 1, 0], [1, 1, 1]);
+    this.addQuad(cV, [this.canvas.width / 2 - 1, this.canvas.height / 2 - crossSize, 0], [this.canvas.width / 2 + 1, this.canvas.height / 2 - crossSize, 0], [this.canvas.width / 2 + 1, this.canvas.height / 2 + crossSize, 0], [this.canvas.width / 2 - 1, this.canvas.height / 2 + crossSize, 0], [1, 1, 1]);
+    const cVbo = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, cVbo);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(cV), gl.STATIC_DRAW);
+    gl.vertexAttribPointer(gl.getAttribLocation(program, "aPosition"), 3, gl.FLOAT, false, 24, 0);
+    gl.vertexAttribPointer(gl.getAttribLocation(program, "aColor"), 3, gl.FLOAT, false, 24, 12);
+    gl.drawArrays(gl.TRIANGLES, 0, cV.length / 6);
+    gl.deleteBuffer(cVbo);
 
-    const view = new Float32Array(16);
-    view[0] = sx;
-    view[1] = ux;
-    view[2] = -fx;
-    view[3] = 0;
-    view[4] = 0;
-    view[5] = uy;
-    view[6] = -0;
-    view[7] = 0;
-    view[8] = sz;
-    view[9] = uz;
-    view[10] = -fz;
-    view[11] = 0;
-    view[12] = -(sx * px + 0 * py + sz * pz);
-    view[13] = -(ux * px + uy * py + uz * pz);
-    view[14] = -(-fx * px + -0 * py + -fz * pz);
-    view[15] = 1;
-
-    const uProjection = gl.getUniformLocation(program, "uProjection");
-    const uView = gl.getUniformLocation(program, "uView");
-    gl.uniformMatrix4fv(uProjection, false, proj);
-    gl.uniformMatrix4fv(uView, false, view);
-
-    gl.drawArrays(gl.TRIANGLES, 0, vertexCount);
+    gl.enable(gl.DEPTH_TEST);
   }
 }
-
