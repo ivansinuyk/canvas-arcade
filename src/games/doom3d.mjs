@@ -1,5 +1,3 @@
-// Doom-style 3D game: full mouse look, multiple floors, enemies, weapons, pickups, HUD.
-
 export class Doom3DGame {
   constructor(canvas, _ctx2d, setStatus) {
     this.canvas = canvas;
@@ -7,108 +5,208 @@ export class Doom3DGame {
 
     this.gl = null;
     this.program = null;
-    this.buffers = null;
+    this.loc = {};
+    this.sceneVbo = null;
+    this.sceneVertCount = 0;
+    this.dynVbo = null;
+    this.hudVbo = null;
 
-    // Camera
     this.camX = 0;
-    this.camY = 1.0;
-    this.camZ = 4;
+    this.camY = 1.5;
+    this.camZ = 0;
     this.yaw = 0;
-    this.pitch = 0; // vertical look (radians)
-    this.moveSpeed = 4.5;
-    this.mouseSensitivity = 0.0022;
-    this.maxPitch = (85 * Math.PI) / 180;
+    this.pitch = 0;
+    this.moveSpeed = 5;
+    this.mouseSens = 0.002;
+    this.maxPitch = (80 * Math.PI) / 180;
+    this.headBob = 0;
+    this.bobActive = false;
 
-    // Player
-    this.playerHp = 100;
+    this.hp = 100;
     this.maxHp = 100;
-    this.weapons = [
-      { name: "Pistol", damage: 28, cooldown: 0.35 },
-      { name: "Shotgun", damage: 65, cooldown: 0.9 },
-      { name: "Chaingun", damage: 18, cooldown: 0.12 },
-    ];
-    this.ownedWeapons = [0]; // indices: start with pistol
-    this.currentWeaponIndex = 0;
-    this.shootCooldown = 0;
+    this.armor = 0;
+    this.maxArmor = 100;
+    this.ammo = 50;
+    this.maxAmmo = 200;
 
-    // World
-    this.enemies = [];
-    this.pickups = []; // { type: 'health'|'weapon', value, x,y,z, collected }
-    this.enemyTypes = [
-      { name: "Imp", hp: 60, speed: 1.2, color: [0.9, 0.25, 0.2], damage: 8 },
-      { name: "Zombie", hp: 90, speed: 0.9, color: [0.2, 0.6, 0.3], damage: 12 },
-      { name: "Demon", hp: 130, speed: 1.6, color: [0.5, 0.2, 0.6], damage: 15 },
+    this.weapons = [
+      { name: "Fist", dmg: 25, cd: 0.4, ammoUse: 0, range: 2.5 },
+      { name: "Pistol", dmg: 22, cd: 0.35, ammoUse: 1, range: 50 },
+      { name: "Shotgun", dmg: 65, cd: 0.85, ammoUse: 2, range: 20 },
+      { name: "Chaingun", dmg: 15, cd: 0.08, ammoUse: 1, range: 50 },
     ];
+    this.owned = [0, 1];
+    this.wpnIdx = 1;
+    this.shootCD = 0;
+    this.muzzleFlash = 0;
+    this.damageFlash = 0;
+    this.weaponKick = 0;
+    this.mouseHeld = false;
+
+    this.enemies = [];
+    this.pickups = [];
+    this.projectiles = [];
+    this.time = 0;
+    this.kills = 0;
+    this.totalEnemies = 0;
+
+    this.enemyTypes = [
+      { name: "Imp", hp: 60, spd: 2.2, col: [0.85, 0.2, 0.15], dmg: 8, atkRange: 12, atkCD: 1.8, ranged: true, projSpd: 8, sz: 0.45 },
+      { name: "Zombie", hp: 40, spd: 1.5, col: [0.3, 0.55, 0.2], dmg: 10, atkRange: 10, atkCD: 2.2, ranged: true, projSpd: 10, sz: 0.45 },
+      { name: "Demon", hp: 150, spd: 3.5, col: [0.55, 0.15, 0.5], dmg: 25, atkRange: 2, atkCD: 0.7, ranged: false, projSpd: 0, sz: 0.55 },
+      { name: "Baron", hp: 250, spd: 1.8, col: [0.5, 0.8, 0.2], dmg: 18, atkRange: 18, atkCD: 2.0, ranged: true, projSpd: 7, sz: 0.6 },
+    ];
+
+    this.mapData = null;
+    this.mapW = 0;
+    this.mapH = 0;
+    this.cellSize = 3;
+    this.wallH = 3;
+    this.lights = [];
+
+    this.hudOverlay = null;
+    this.hudCtx = null;
+
+    this._onMouseUp = (e) => {
+      if (e.button === 0) this.mouseHeld = false;
+    };
+    window.addEventListener("mouseup", this._onMouseUp);
 
     this.gameOver = false;
     this.autoRestart = false;
-    this.setStatus("Doom3D: Click to lock mouse. WASD move, 1-3 weapons, mouse look & shoot.");
+    this.levelComplete = false;
+  }
+
+  cleanup() {
+    window.removeEventListener("mouseup", this._onMouseUp);
+    if (this.hudOverlay) {
+      this.hudOverlay.remove();
+      this.hudOverlay = null;
+      this.hudCtx = null;
+    }
   }
 
   reset() {
-    this.camX = 0;
-    this.camY = 1.0;
-    this.camZ = 4;
+    this.hp = this.maxHp;
+    this.armor = 0;
+    this.ammo = 50;
+    this.owned = [0, 1];
+    this.wpnIdx = 1;
+    this.shootCD = 0;
+    this.muzzleFlash = 0;
+    this.damageFlash = 0;
+    this.weaponKick = 0;
+    this.kills = 0;
+    this.gameOver = false;
+    this.levelComplete = false;
+    this.time = 0;
+    this.projectiles = [];
     this.yaw = 0;
     this.pitch = 0;
-    this.playerHp = this.maxHp;
-    this.ownedWeapons = [0];
-    this.currentWeaponIndex = 0;
-    this.shootCooldown = 0;
-    this.gameOver = false;
-    this.spawnEnemies();
-    this.spawnPickups();
-    this.setStatus("Doom3D: WASD move, 1-3 weapons, mouse look & shoot. Find health & weapons.");
+    this.headBob = 0;
+    this.mouseHeld = false;
+    this.sceneVbo = null;
+    this.buildLevel();
+    this.setStatus("Doom3D: Click to lock mouse. WASD move, mouse aim/shoot, 1-4 weapons.");
   }
 
-  spawnEnemies() {
-    this.enemies = [];
-    const positions = [
-      [3, 0, 2], [-3, 0, -2], [0, 0, -4], [-4, 0, 3], [4, 0, -3],
-      [2, 1.5, 2], [-2, 1.5, -1], // upper floor
+  buildLevel() {
+    this.mapData = [
+      "################",
+      "#..............#",
+      "#..##....###...#",
+      "#..##....#.....#",
+      "#........#..####",
+      "#...####.#.....#",
+      "#...#..........#",
+      "#...#..####..###",
+      "#...#..#.......#",
+      "###....#..####.#",
+      "#......#.......#",
+      "#..#####..###..#",
+      "#.............##",
+      "#..####..####..#",
+      "#..............#",
+      "################",
     ];
-    positions.forEach(([x, y, z], i) => {
-      const type = i % this.enemyTypes.length;
-      const et = this.enemyTypes[type];
-      this.enemies.push({
-        x, y, z,
-        hp: et.hp,
-        maxHp: et.hp,
-        type,
-        color: et.color.slice(),
-        damage: et.damage,
-        speed: et.speed,
-      });
-    });
-  }
+    this.mapW = this.mapData[0].length;
+    this.mapH = this.mapData.length;
+    const cs = this.cellSize;
 
-  spawnPickups() {
-    this.pickups = [
-      { type: "health", value: 25, x: 2.5, y: 0, z: -3, collected: false },
-      { type: "health", value: 25, x: -3, y: 0, z: 2, collected: false },
-      { type: "health", value: 50, x: 0, y: 1.5, z: 2.5, collected: false },
-      { type: "weapon", value: 1, x: -4, y: 0, z: -3, collected: false },
-      { type: "weapon", value: 2, x: 4, y: 1.5, z: 1, collected: false },
+    this.camX = 1.5 * cs;
+    this.camZ = 1.5 * cs;
+    this.camY = 1.5;
+
+    this.lights = [];
+    const lp = [
+      [2, 1], [7, 1], [13, 1], [1, 5], [6, 3], [10, 4],
+      [14, 5], [5, 7], [10, 7], [2, 10], [7, 10], [13, 10],
     ];
-  }
-
-  getFloorHeight(x, z) {
-    const half = 6;
-    if (x < -half || x > half || z < -half || z > half) return 0;
-    if (x >= -1 && x <= 1 && z >= -2 && z <= 0) return 0.2 + (z + 2) / 2 * 1.3;
-    if (x >= -5 && x <= -2 && z >= 2 && z <= 5) return 1.5;
-    if (x >= 2 && x <= 5 && z >= -1 && z <= 2) return 1.5;
-    return 0;
-  }
-
-  isWallOrPillar(x, z, margin = 0.25) {
-    const half = 6;
-    if (x < -half + margin || x > half - margin || z < -half + margin || z > half - margin) return true;
-    const pillars = [[-2.5, -1.5], [2, 1.8], [0, 0], [-4, 3.5], [4, -2.5]];
-    for (const [cx, cz] of pillars) {
-      if (Math.abs(x - cx) < 0.6 + margin && Math.abs(z - cz) < 0.6 + margin) return true;
+    for (const [c, r] of lp) {
+      if (r < this.mapH && c < this.mapW && this.mapData[r][c] === ".") {
+        this.lights.push({
+          x: (c + 0.5) * cs, y: 2.4, z: (r + 0.5) * cs,
+          r: 1.0, g: 0.65 + Math.random() * 0.15, b: 0.25,
+          phase: Math.random() * Math.PI * 2,
+          flicker: 0.1 + Math.random() * 0.2,
+        });
+      }
     }
-    return false;
+
+    this.enemies = [];
+    const es = [
+      [5, 2, 0], [10, 3, 1], [7, 5, 0], [13, 5, 2],
+      [3, 7, 1], [10, 7, 0], [5, 9, 2], [13, 9, 1],
+      [8, 11, 3], [3, 12, 0], [11, 12, 2], [7, 14, 1],
+      [13, 14, 3],
+    ];
+    for (const [c, r, type] of es) {
+      if (r < this.mapH && c < this.mapW && this.mapData[r][c] === ".") {
+        const et = this.enemyTypes[type];
+        this.enemies.push({
+          x: (c + 0.5) * cs, y: 0, z: (r + 0.5) * cs,
+          hp: et.hp, maxHp: et.hp, type,
+          speed: et.spd, dmg: et.dmg,
+          atkRange: et.atkRange, atkCD: et.atkCD,
+          atkTimer: Math.random() * et.atkCD,
+          ranged: et.ranged, alive: true, flinch: 0,
+        });
+      }
+    }
+    this.totalEnemies = this.enemies.length;
+
+    this.pickups = [];
+    const ps = [
+      [3, 3, "health", 25], [13, 2, "health", 25], [1, 8, "health", 50],
+      [14, 14, "health", 50], [6, 1, "armor", 30], [10, 10, "armor", 50],
+      [2, 6, "ammo", 20], [8, 8, "ammo", 30], [12, 3, "ammo", 20],
+      [5, 13, "ammo", 25], [10, 1, "weapon", 2], [1, 14, "weapon", 3],
+    ];
+    for (const [c, r, type, value] of ps) {
+      if (r < this.mapH && c < this.mapW && this.mapData[r][c] === ".") {
+        this.pickups.push({
+          x: (c + 0.5) * cs, y: 0.3, z: (r + 0.5) * cs,
+          type, value, collected: false,
+        });
+      }
+    }
+  }
+
+  isWall(c, r) {
+    if (c < 0 || c >= this.mapW || r < 0 || r >= this.mapH) return true;
+    return this.mapData[r][c] === "#";
+  }
+
+  canMove(x, z, rad = 0.3) {
+    const cs = this.cellSize;
+    const checks = [
+      [x - rad, z - rad], [x + rad, z - rad],
+      [x - rad, z + rad], [x + rad, z + rad],
+    ];
+    for (const [px, pz] of checks) {
+      if (this.isWall(Math.floor(px / cs), Math.floor(pz / cs))) return false;
+    }
+    return true;
   }
 
   onKeyDown(e) {
@@ -116,365 +214,729 @@ export class Doom3DGame {
       if (document.pointerLockElement === this.canvas) document.exitPointerLock?.();
       return;
     }
-    if (e.code === "Digit1" && this.ownedWeapons.includes(0)) this.currentWeaponIndex = 0;
-    if (e.code === "Digit2" && this.ownedWeapons.includes(1)) this.currentWeaponIndex = 1;
-    if (e.code === "Digit3" && this.ownedWeapons.includes(2)) this.currentWeaponIndex = 2;
+    if (this.gameOver || this.levelComplete) {
+      if (e.code === "Space" || e.code === "Enter") this.reset();
+      return;
+    }
+    if (e.code === "Digit1" && this.owned.includes(0)) this.wpnIdx = 0;
+    if (e.code === "Digit2" && this.owned.includes(1)) this.wpnIdx = 1;
+    if (e.code === "Digit3" && this.owned.includes(2)) this.wpnIdx = 2;
+    if (e.code === "Digit4" && this.owned.includes(3)) this.wpnIdx = 3;
   }
 
   onKeyUp() {}
 
   onMouseMove(e) {
     if (document.pointerLockElement !== this.canvas) return;
-    const dx = e.movementX || 0;
-    const dy = e.movementY || 0;
-    this.yaw += dx * this.mouseSensitivity;
-    this.pitch -= dy * this.mouseSensitivity;
-    if (this.pitch > this.maxPitch) this.pitch = this.maxPitch;
-    if (this.pitch < -this.maxPitch) this.pitch = -this.maxPitch;
+    this.yaw += (e.movementX || 0) * this.mouseSens;
+    this.pitch -= (e.movementY || 0) * this.mouseSens;
+    this.pitch = Math.max(-this.maxPitch, Math.min(this.maxPitch, this.pitch));
   }
 
   onMouseDown(e) {
     if (e.button !== 0) return;
-    if (this.gameOver) {
-      this.reset();
+    if (this.gameOver || this.levelComplete) { this.reset(); return; }
+    if (document.pointerLockElement !== this.canvas) {
+      this.canvas.requestPointerLock?.();
       return;
     }
-    if (document.pointerLockElement !== this.canvas) this.canvas.requestPointerLock?.();
+    this.mouseHeld = true;
     this.tryShoot();
   }
 
   tryShoot() {
-    if (this.shootCooldown > 0 || this.gameOver) return;
-    const w = this.weapons[this.currentWeaponIndex];
-    if (!w) return;
-    this.shootCooldown = w.cooldown;
+    if (this.shootCD > 0 || this.gameOver) return;
+    const w = this.weapons[this.wpnIdx];
+    if (w.ammoUse > 0 && this.ammo < w.ammoUse) return;
 
-    const sinY = Math.sin(this.yaw);
-    const cosY = Math.cos(this.yaw);
-    const sinP = Math.sin(this.pitch);
-    const cosP = Math.cos(this.pitch);
-    const dirX = sinY * cosP;
-    const dirY = -sinP;
-    const dirZ = -cosY * cosP;
+    this.ammo -= w.ammoUse;
+    this.shootCD = w.cd;
+    this.muzzleFlash = 1.0;
+    this.weaponKick = 1.0;
 
-    let bestT = Infinity;
-    let hitEnemy = null;
+    const sy = Math.sin(this.yaw), cy = Math.cos(this.yaw);
+    const sp = Math.sin(this.pitch), cp = Math.cos(this.pitch);
+    const dx = sy * cp, dy = -sp, dz = -cy * cp;
+
+    let bestT = Infinity, hitEnemy = null;
     for (const e of this.enemies) {
-      if (e.hp <= 0) continue;
-      const dx = e.x - this.camX;
-      const dy = (e.y + 0.5) - this.camY;
-      const dz = e.z - this.camZ;
-      const t = (dx * dirX + dy * dirY + dz * dirZ) / (dirX * dirX + dirY * dirY + dirZ * dirZ);
-      if (t < 0.1) continue;
-      const px = this.camX + dirX * t;
-      const py = this.camY + dirY * t;
-      const pz = this.camZ + dirZ * t;
-      const dist = Math.abs(px - e.x) + Math.abs(py - (e.y + 0.5)) + Math.abs(pz - e.z);
-      if (dist < 1.2 && t < bestT) {
-        bestT = t;
-        hitEnemy = e;
-      }
+      if (!e.alive) continue;
+      const ex = e.x - this.camX, ey = (e.y + 0.5) - this.camY, ez = e.z - this.camZ;
+      const t = (ex * dx + ey * dy + ez * dz) / (dx * dx + dy * dy + dz * dz);
+      if (t < 0.1 || t > w.range) continue;
+      const px = this.camX + dx * t - e.x;
+      const py = this.camY + dy * t - (e.y + 0.5);
+      const pz = this.camZ + dz * t - e.z;
+      const dist = Math.sqrt(px * px + py * py + pz * pz);
+      if (dist < 0.8 && t < bestT) { bestT = t; hitEnemy = e; }
     }
     if (hitEnemy) {
-      hitEnemy.hp -= w.damage;
-      if (hitEnemy.hp <= 0) hitEnemy.hp = 0;
+      hitEnemy.hp -= w.dmg;
+      hitEnemy.flinch = 0.15;
+      if (hitEnemy.hp <= 0) { hitEnemy.alive = false; this.kills++; }
     }
   }
 
   update(dt, keyState) {
-    if (this.gameOver) return;
+    if (this.gameOver || this.levelComplete) return;
+    this.time += dt;
 
-    if (this.shootCooldown > 0) this.shootCooldown -= dt;
+    if (this.shootCD > 0) this.shootCD -= dt;
+    if (this.muzzleFlash > 0) this.muzzleFlash -= dt * 8;
+    if (this.damageFlash > 0) this.damageFlash -= dt * 4;
+    if (this.weaponKick > 0) this.weaponKick -= dt * 6;
 
-    const forward = keyState.has("KeyW") || keyState.has("ArrowUp");
-    const backward = keyState.has("KeyS") || keyState.has("ArrowDown");
+    if (this.mouseHeld && this.shootCD <= 0 && document.pointerLockElement === this.canvas) {
+      this.tryShoot();
+    }
+
+    const fwd = keyState.has("KeyW") || keyState.has("ArrowUp");
+    const bwd = keyState.has("KeyS") || keyState.has("ArrowDown");
     const left = keyState.has("KeyA");
     const right = keyState.has("KeyD");
 
-    const sinYaw = Math.sin(this.yaw);
-    const cosYaw = Math.cos(this.yaw);
+    const sy = Math.sin(this.yaw), cy = Math.cos(this.yaw);
     let vx = 0, vz = 0;
-    if (forward) { vx += sinYaw; vz += -cosYaw; }
-    if (backward) { vx -= sinYaw; vz -= -cosYaw; }
-    if (left) { vx += -cosYaw; vz += -sinYaw; }
-    if (right) { vx -= -cosYaw; vz -= -sinYaw; }
+    if (fwd) { vx += sy; vz -= cy; }
+    if (bwd) { vx -= sy; vz += cy; }
+    if (left) { vx -= cy; vz -= sy; }
+    if (right) { vx += cy; vz += sy; }
 
     const len = Math.hypot(vx, vz);
+    this.bobActive = len > 0.01;
     if (len > 1e-5) {
       vx /= len; vz /= len;
       const step = this.moveSpeed * dt;
-      let nx = this.camX + vx * step;
-      let nz = this.camZ + vz * step;
-      if (!this.isWallOrPillar(nx, this.camZ)) this.camX = nx;
-      if (!this.isWallOrPillar(this.camX, nz)) this.camZ = nz;
+      const nx = this.camX + vx * step;
+      const nz = this.camZ + vz * step;
+      if (this.canMove(nx, this.camZ)) this.camX = nx;
+      if (this.canMove(this.camX, nz)) this.camZ = nz;
+      this.headBob += dt * 10;
     }
-
-    this.camY = this.getFloorHeight(this.camX, this.camZ) + 1.0;
 
     for (const p of this.pickups) {
       if (p.collected) continue;
       const dx = p.x - this.camX, dz = p.z - this.camZ;
-      if (dx * dx + dz * dz < 0.8) {
+      if (dx * dx + dz * dz < 1.0) {
         p.collected = true;
-        if (p.type === "health") this.playerHp = Math.min(this.maxHp, this.playerHp + p.value);
-        if (p.type === "weapon" && !this.ownedWeapons.includes(p.value)) this.ownedWeapons.push(p.value);
+        if (p.type === "health") this.hp = Math.min(this.maxHp, this.hp + p.value);
+        if (p.type === "armor") this.armor = Math.min(this.maxArmor, this.armor + p.value);
+        if (p.type === "ammo") this.ammo = Math.min(this.maxAmmo, this.ammo + p.value);
+        if (p.type === "weapon" && !this.owned.includes(p.value)) {
+          this.owned.push(p.value);
+          this.wpnIdx = p.value;
+        }
       }
     }
 
     for (const e of this.enemies) {
-      if (e.hp <= 0) continue;
+      if (!e.alive) continue;
+      if (e.flinch > 0) e.flinch -= dt;
+
       const dx = this.camX - e.x, dz = this.camZ - e.z;
       const dist = Math.hypot(dx, dz);
-      if (dist < 0.5) {
-        this.playerHp -= e.damage * dt * 2;
-        if (this.playerHp <= 0) {
-          this.playerHp = 0;
-          this.gameOver = true;
-          this.setStatus("Doom3D: You died. Click to restart.");
+
+      if (dist < 1.0) {
+        this.takeDamage(e.dmg * dt * 2);
+      } else if (dist > 0.5) {
+        const step = e.speed * dt;
+        const nx = e.x + (dx / dist) * step;
+        const nz = e.z + (dz / dist) * step;
+        if (this.canMove(nx, e.z, 0.4)) e.x = nx;
+        if (this.canMove(e.x, nz, 0.4)) e.z = nz;
+      }
+
+      if (e.ranged && dist < e.atkRange && dist > 2) {
+        e.atkTimer -= dt;
+        if (e.atkTimer <= 0) {
+          e.atkTimer = e.atkCD;
+          const et = this.enemyTypes[e.type];
+          this.projectiles.push({
+            x: e.x, y: e.y + 0.8, z: e.z,
+            vx: (dx / dist) * et.projSpd, vy: 0, vz: (dz / dist) * et.projSpd,
+            dmg: e.dmg, life: 4,
+            col: et.col.map((c) => Math.min(1, c + 0.3)),
+          });
         }
+      }
+    }
+
+    for (let i = this.projectiles.length - 1; i >= 0; i--) {
+      const pr = this.projectiles[i];
+      pr.x += pr.vx * dt;
+      pr.y += pr.vy * dt;
+      pr.z += pr.vz * dt;
+      pr.life -= dt;
+
+      const [c, r] = [Math.floor(pr.x / this.cellSize), Math.floor(pr.z / this.cellSize)];
+      if (this.isWall(c, r) || pr.life <= 0) {
+        this.projectiles.splice(i, 1);
         continue;
       }
-      if (dist < 0.01) continue;
-      const step = e.speed * dt;
-      let nx = e.x + (dx / dist) * step;
-      let nz = e.z + (dz / dist) * step;
-      if (!this.isWallOrPillar(nx, e.z)) e.x = nx;
-      if (!this.isWallOrPillar(e.x, nz)) e.z = nz;
-      e.y = this.getFloorHeight(e.x, e.z);
+
+      const pdx = pr.x - this.camX, pdz = pr.z - this.camZ;
+      const pdy = pr.y - this.camY;
+      if (pdx * pdx + pdy * pdy + pdz * pdz < 0.6) {
+        this.takeDamage(pr.dmg);
+        this.projectiles.splice(i, 1);
+      }
     }
 
-    const alive = this.enemies.filter((e) => e.hp > 0).length;
-    if (!this.gameOver) {
-      const w = this.weapons[this.currentWeaponIndex];
-      this.setStatus(
-        `HP ${Math.round(this.playerHp)} | ${w ? w.name : ""} | Enemies ${alive} | 1-3 switch weapon`
-      );
-    }
-  }
-
-  ensureGl() {
-    if (this.gl) return;
-    let gl = this.canvas.getContext("webgl") || this.canvas.getContext("experimental-webgl") || this.canvas.getContext("webgl2");
-    if (!gl) {
-      this.setStatus("Doom3D: WebGL not supported.");
-      this.gameOver = true;
+    if (this.kills >= this.totalEnemies) {
+      this.levelComplete = true;
+      this.setStatus("Doom3D: LEVEL COMPLETE! All enemies eliminated. Click to restart.");
       return;
     }
+
+    const w = this.weapons[this.wpnIdx];
+    this.setStatus(
+      `HP ${Math.round(this.hp)} | Armor ${this.armor} | ${w.name} [${this.ammo}] | Kills ${this.kills}/${this.totalEnemies}`
+    );
+  }
+
+  takeDamage(amount) {
+    let dmg = amount;
+    if (this.armor > 0) {
+      const absorbed = Math.min(this.armor, dmg * 0.6);
+      this.armor -= absorbed;
+      dmg -= absorbed;
+    }
+    this.hp -= dmg;
+    this.damageFlash = Math.min(1, this.damageFlash + 0.4);
+    if (this.hp <= 0) {
+      this.hp = 0;
+      this.gameOver = true;
+      this.setStatus("Doom3D: YOU DIED. Click or press SPACE to restart.");
+    }
+  }
+
+  initGL() {
+    if (this.gl) return;
+    const gl = this.canvas.getContext("webgl") || this.canvas.getContext("experimental-webgl");
+    if (!gl) { this.setStatus("Doom3D: WebGL not available."); this.gameOver = true; return; }
     this.gl = gl;
 
-    const vs = `attribute vec3 aPosition; attribute vec3 aColor; uniform mat4 uProjection; uniform mat4 uView; varying vec3 vColor;
-      void main() { gl_Position = uProjection * uView * vec4(aPosition, 1.0); vColor = aColor; }`;
-    const fs = `precision mediump float; varying vec3 vColor; void main() { gl_FragColor = vec4(vColor, 1.0); }`;
-    const vsh = this.createShader(gl, gl.VERTEX_SHADER, vs);
-    const fsh = this.createShader(gl, gl.FRAGMENT_SHADER, fs);
-    this.program = this.createProgram(gl, vsh, fsh);
-    this.buffers = this.createSceneBuffers(gl);
-    gl.enable(gl.DEPTH_TEST);
-  }
+    const vsSource = `
+      attribute vec3 aPos;
+      attribute vec3 aNorm;
+      attribute vec3 aCol;
+      uniform mat4 uProj;
+      uniform mat4 uView;
+      varying vec3 vCol;
+      varying vec3 vWPos;
+      varying vec3 vNorm;
+      void main(){
+        gl_Position = uProj * uView * vec4(aPos, 1.0);
+        vCol = aCol;
+        vWPos = aPos;
+        vNorm = aNorm;
+      }`;
 
-  createShader(gl, type, source) {
-    const s = gl.createShader(type);
-    gl.shaderSource(s, source);
-    gl.compileShader(s);
-    if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) console.error(gl.getShaderInfoLog(s));
-    return s;
-  }
+    const fsSource = `
+      precision mediump float;
+      varying vec3 vCol;
+      varying vec3 vWPos;
+      varying vec3 vNorm;
+      uniform float uHud;
+      uniform float uAlpha;
+      uniform vec3 uCamPos;
+      uniform vec3 uLP[12];
+      uniform vec3 uLC[12];
+      uniform float uNL;
+      uniform float uDmg;
+      uniform float uMuz;
+      uniform vec3 uFogCol;
+      uniform float uFogD;
 
-  createProgram(gl, vs, fs) {
+      void main(){
+        if(uHud > 0.5){ gl_FragColor = vec4(vCol, uAlpha); return; }
+
+        vec3 n = normalize(vNorm);
+        float iw = step(0.5, abs(n.x) + abs(n.z));
+        vec2 wuv = abs(n.x) > 0.5 ? vWPos.zy : vWPos.xy;
+        float br = floor(wuv.y * 3.0);
+        vec2 bk = fract(vec2(wuv.x * 1.5 + mod(br, 2.0) * 0.5, wuv.y * 3.0));
+        float mt = step(0.06, bk.x) * step(0.08, bk.y);
+        float wp = mix(0.7, 1.0, mt);
+
+        float ifl = step(0.5, n.y);
+        vec2 tuv = fract(vWPos.xz * 0.7);
+        float tb = step(0.04, tuv.x) * step(0.04, tuv.y) * step(tuv.x, 0.96) * step(tuv.y, 0.96);
+        float fp = mix(0.82, 1.0, tb);
+
+        float pat = mix(1.0, wp, iw) * mix(1.0, fp, ifl);
+        vec3 bc = vCol * pat;
+
+        vec3 amb = 0.05 * bc;
+        vec3 dif = vec3(0.0);
+        for(int i = 0; i < 12; i++){
+          float a = step(float(i) + 0.5, uNL);
+          vec3 tl = uLP[i] - vWPos;
+          float d = length(tl);
+          vec3 ld = tl / max(d, 0.001);
+          float at = a / (1.0 + 0.09 * d + 0.035 * d * d);
+          dif += uLC[i] * max(dot(n, ld), 0.0) * at;
+        }
+        vec3 lit = amb + dif * bc;
+
+        float fd = length(vWPos - uCamPos);
+        lit = mix(lit, uFogCol, clamp(1.0 - exp(-uFogD * fd), 0.0, 1.0));
+
+        lit += vec3(uDmg * 0.45, uDmg * 0.02, uDmg * 0.02);
+        lit += vec3(uMuz) * vec3(1.0, 0.8, 0.3) * 0.2;
+        gl_FragColor = vec4(lit, 1.0);
+      }`;
+
+    const compile = (type, src) => {
+      const s = gl.createShader(type);
+      gl.shaderSource(s, src);
+      gl.compileShader(s);
+      if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) console.error(gl.getShaderInfoLog(s));
+      return s;
+    };
+    const vs = compile(gl.VERTEX_SHADER, vsSource);
+    const fs = compile(gl.FRAGMENT_SHADER, fsSource);
     const p = gl.createProgram();
     gl.attachShader(p, vs);
     gl.attachShader(p, fs);
     gl.linkProgram(p);
     if (!gl.getProgramParameter(p, gl.LINK_STATUS)) console.error(gl.getProgramInfoLog(p));
-    return p;
+    this.program = p;
+
+    this.loc = {
+      aPos: gl.getAttribLocation(p, "aPos"),
+      aNorm: gl.getAttribLocation(p, "aNorm"),
+      aCol: gl.getAttribLocation(p, "aCol"),
+      proj: gl.getUniformLocation(p, "uProj"),
+      view: gl.getUniformLocation(p, "uView"),
+      hud: gl.getUniformLocation(p, "uHud"),
+      alpha: gl.getUniformLocation(p, "uAlpha"),
+      camPos: gl.getUniformLocation(p, "uCamPos"),
+      lp: gl.getUniformLocation(p, "uLP[0]"),
+      lc: gl.getUniformLocation(p, "uLC[0]"),
+      nl: gl.getUniformLocation(p, "uNL"),
+      dmg: gl.getUniformLocation(p, "uDmg"),
+      muz: gl.getUniformLocation(p, "uMuz"),
+      fogCol: gl.getUniformLocation(p, "uFogCol"),
+      fogD: gl.getUniformLocation(p, "uFogD"),
+    };
+
+    gl.enable(gl.DEPTH_TEST);
+    gl.useProgram(p);
   }
 
-  addQuad(vertices, p1, p2, p3, p4, color) {
-    const [r, g, b] = color;
-    const push = (p) => vertices.push(p[0], p[1], p[2], r, g, b);
+  addQuadN(v, p1, p2, p3, p4, n, c) {
+    const [nx, ny, nz] = n;
+    const [cr, cg, cb] = c;
+    const push = (p) => v.push(p[0], p[1], p[2], nx, ny, nz, cr, cg, cb);
     push(p1); push(p2); push(p3);
     push(p1); push(p3); push(p4);
   }
 
-  createSceneBuffers(gl) {
-    const vertices = [];
-    const half = 6, floorY = 0, ceilY = 3;
-    const wall1 = [0.23, 0.34, 0.46], wall2 = [0.18, 0.25, 0.36];
-    const picColor = [0.6, 0.45, 0.25];
-
-    this.addQuad(vertices,
-      [-half, floorY, -half], [half, floorY, -half], [half, floorY, half], [-half, floorY, half],
-      [0.12, 0.19, 0.25]);
-    this.addQuad(vertices,
-      [-half, ceilY, -half], [-half, ceilY, half], [half, ceilY, half], [half, ceilY, -half],
-      [0.05, 0.07, 0.12]);
-
-    this.addQuad(vertices, [-half, floorY, -half], [-half, ceilY, -half], [half, ceilY, -half], [half, floorY, -half], wall1);
-    this.addQuad(vertices, [-half, floorY, half], [half, floorY, half], [half, ceilY, half], [-half, ceilY, half], wall1);
-    this.addQuad(vertices, [-half, floorY, -half], [-half, floorY, half], [-half, ceilY, half], [-half, ceilY, -half], wall2);
-    this.addQuad(vertices, [half, floorY, -half], [half, ceilY, -half], [half, ceilY, half], [half, floorY, half], wall2);
-
-    this.addQuad(vertices, [-half, 1.2, -half + 0.01], [0, 1.2, -half + 0.01], [0, 2.4, -half + 0.01], [-half, 2.4, -half + 0.01], picColor);
-    this.addQuad(vertices, [0, 1.2, -half + 0.01], [half, 1.2, -half + 0.01], [half, 2.4, -half + 0.01], [0, 2.4, -half + 0.01], [0.3, 0.5, 0.6]);
-
-    const pillar = (cx, cz, size, height, color) => {
-      const s = size / 2, y0 = floorY, y1 = y0 + height;
-      this.addQuad(vertices, [cx - s, y0, cz + s], [cx + s, y0, cz + s], [cx + s, y1, cz + s], [cx - s, y1, cz + s], color);
-      this.addQuad(vertices, [cx - s, y0, cz - s], [cx - s, y1, cz - s], [cx + s, y1, cz - s], [cx + s, y0, cz - s], color);
-      this.addQuad(vertices, [cx - s, y0, cz - s], [cx - s, y0, cz + s], [cx - s, y1, cz + s], [cx - s, y1, cz - s], color);
-      this.addQuad(vertices, [cx + s, y0, cz - s], [cx + s, y1, cz - s], [cx + s, y1, cz + s], [cx + s, y0, cz + s], color);
-    };
-    pillar(-2.5, -1.5, 1.2, 2.8, [0.45, 0.26, 0.55]);
-    pillar(2, 1.8, 1, 2.4, [0.45, 0.26, 0.55]);
-    pillar(0, 0, 1.4, 2.2, [0.4, 0.3, 0.5]);
-
-    const rampY0 = 0.2, rampY1 = 1.5;
-    for (let z = -2; z <= 0; z += 0.5) {
-      const t = (z + 2) / 2;
-      const y = rampY0 + t * (rampY1 - rampY0);
-      this.addQuad(vertices, [-1, y, z], [1, y, z], [1, y, z + 0.5], [-1, y, z + 0.5], [0.15, 0.22, 0.3]);
-    }
-    this.addQuad(vertices, [-5, 1.5, 2], [5, 1.5, 2], [5, 1.5, 5], [-5, 1.5, 5], [0.14, 0.2, 0.28]);
-    this.addQuad(vertices, [2, 1.5, -1], [5, 1.5, -1], [5, 1.5, 2], [2, 1.5, 2], [0.14, 0.2, 0.28]);
-    pillar(-4, 3.5, 1, 1.5, [0.4, 0.3, 0.5]);
-    pillar(4, -2.5, 1, 1.5, [0.4, 0.3, 0.5]);
-
-    const data = new Float32Array(vertices);
-    const vbo = gl.createBuffer();
-    gl.bindBuffer(gl.ARRAY_BUFFER, vbo);
-    gl.bufferData(gl.ARRAY_BUFFER, data, gl.STATIC_DRAW);
-    return { vbo, vertexCount: data.length / 6 };
+  addBox(v, cx, cy, cz, hw, hh, hd, c) {
+    this.addQuadN(v, [cx - hw, cy - hh, cz + hd], [cx + hw, cy - hh, cz + hd], [cx + hw, cy + hh, cz + hd], [cx - hw, cy + hh, cz + hd], [0, 0, 1], c);
+    this.addQuadN(v, [cx + hw, cy - hh, cz - hd], [cx - hw, cy - hh, cz - hd], [cx - hw, cy + hh, cz - hd], [cx + hw, cy + hh, cz - hd], [0, 0, -1], c);
+    this.addQuadN(v, [cx - hw, cy - hh, cz - hd], [cx - hw, cy - hh, cz + hd], [cx - hw, cy + hh, cz + hd], [cx - hw, cy + hh, cz - hd], [-1, 0, 0], c);
+    this.addQuadN(v, [cx + hw, cy - hh, cz + hd], [cx + hw, cy - hh, cz - hd], [cx + hw, cy + hh, cz - hd], [cx + hw, cy + hh, cz + hd], [1, 0, 0], c);
+    this.addQuadN(v, [cx - hw, cy + hh, cz - hd], [cx - hw, cy + hh, cz + hd], [cx + hw, cy + hh, cz + hd], [cx + hw, cy + hh, cz - hd], [0, 1, 0], c);
+    this.addQuadN(v, [cx - hw, cy - hh, cz + hd], [cx - hw, cy - hh, cz - hd], [cx + hw, cy - hh, cz - hd], [cx + hw, cy - hh, cz + hd], [0, -1, 0], c);
   }
 
-  drawBox(gl, program, view, proj, cx, cy, cz, size, color) {
-    const s = size / 2;
-    const verts = [];
-    this.addQuad(verts, [cx - s, cy - s, cz + s], [cx + s, cy - s, cz + s], [cx + s, cy + s, cz + s], [cx - s, cy + s, cz + s], color);
-    this.addQuad(verts, [cx - s, cy - s, cz - s], [cx - s, cy + s, cz - s], [cx + s, cy + s, cz - s], [cx + s, cy - s, cz - s], color);
-    this.addQuad(verts, [cx - s, cy - s, cz - s], [cx - s, cy - s, cz + s], [cx - s, cy + s, cz + s], [cx - s, cy + s, cz - s], color);
-    this.addQuad(verts, [cx + s, cy - s, cz - s], [cx + s, cy + s, cz - s], [cx + s, cy + s, cz + s], [cx + s, cy - s, cz + s], color);
-    this.addQuad(verts, [cx - s, cy + s, cz - s], [cx - s, cy + s, cz + s], [cx + s, cy + s, cz + s], [cx + s, cy + s, cz - s], color);
-    this.addQuad(verts, [cx - s, cy - s, cz - s], [cx + s, cy - s, cz - s], [cx + s, cy - s, cz + s], [cx - s, cy - s, cz + s], color);
-    const vbo = gl.createBuffer();
-    gl.bindBuffer(gl.ARRAY_BUFFER, vbo);
-    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(verts), gl.STATIC_DRAW);
-    const stride = 24;
-    gl.vertexAttribPointer(gl.getAttribLocation(program, "aPosition"), 3, gl.FLOAT, false, stride, 0);
-    gl.vertexAttribPointer(gl.getAttribLocation(program, "aColor"), 3, gl.FLOAT, false, stride, 12);
-    gl.uniformMatrix4fv(gl.getUniformLocation(program, "uProjection"), false, proj);
-    gl.uniformMatrix4fv(gl.getUniformLocation(program, "uView"), false, view);
-    gl.drawArrays(gl.TRIANGLES, 0, verts.length / 6);
-    gl.deleteBuffer(vbo);
+  addHudQuad(v, x1, y1, x2, y2, c) {
+    const [r, g, b] = c;
+    const push = (x, y) => v.push(x, y, 0, 0, 0, 0, r, g, b);
+    push(x1, y1); push(x2, y1); push(x2, y2);
+    push(x1, y1); push(x2, y2); push(x1, y2);
+  }
+
+  rebuildScene() {
+    const gl = this.gl;
+    const v = [];
+    const cs = this.cellSize;
+    const wh = this.wallH;
+    const floorC = [0.18, 0.16, 0.14];
+    const ceilC = [0.08, 0.07, 0.06];
+    const wallC1 = [0.35, 0.27, 0.22];
+    const wallC2 = [0.30, 0.23, 0.19];
+
+    for (let r = 0; r < this.mapH; r++) {
+      for (let c = 0; c < this.mapW; c++) {
+        if (this.isWall(c, r)) continue;
+        const x0 = c * cs, x1 = (c + 1) * cs;
+        const z0 = r * cs, z1 = (r + 1) * cs;
+
+        const fv = ((c * 7 + r * 13) % 5) * 0.012;
+        const fc = floorC.map((v) => v + fv);
+        this.addQuadN(v, [x0, 0, z0], [x1, 0, z0], [x1, 0, z1], [x0, 0, z1], [0, 1, 0], fc);
+        this.addQuadN(v, [x0, wh, z0], [x0, wh, z1], [x1, wh, z1], [x1, wh, z0], [0, -1, 0], ceilC);
+
+        if (this.isWall(c, r - 1)) {
+          const wv = ((c * 3 + r * 11) % 7) * 0.008;
+          this.addQuadN(v, [x0, 0, z0], [x0, wh, z0], [x1, wh, z0], [x1, 0, z0], [0, 0, 1], wallC1.map((v) => v + wv));
+        }
+        if (this.isWall(c, r + 1)) {
+          const wv = ((c * 5 + r * 7) % 7) * 0.008;
+          this.addQuadN(v, [x0, 0, z1], [x1, 0, z1], [x1, wh, z1], [x0, wh, z1], [0, 0, -1], wallC1.map((v) => v + wv));
+        }
+        if (this.isWall(c - 1, r)) {
+          const wv = ((c * 9 + r * 5) % 7) * 0.008;
+          this.addQuadN(v, [x0, 0, z0], [x0, 0, z1], [x0, wh, z1], [x0, wh, z0], [1, 0, 0], wallC2.map((v) => v + wv));
+        }
+        if (this.isWall(c + 1, r)) {
+          const wv = ((c * 11 + r * 3) % 7) * 0.008;
+          this.addQuadN(v, [x1, 0, z0], [x1, wh, z0], [x1, wh, z1], [x1, 0, z1], [-1, 0, 0], wallC2.map((v) => v + wv));
+        }
+      }
+    }
+
+    for (const light of this.lights) {
+      this.addBox(v, light.x, 2.6, light.z, 0.12, 0.12, 0.12, [0.9, 0.7, 0.3]);
+      this.addBox(v, light.x, 2.85, light.z, 0.04, 0.15, 0.04, [0.3, 0.25, 0.2]);
+    }
+
+    const data = new Float32Array(v);
+    if (this.sceneVbo) gl.deleteBuffer(this.sceneVbo);
+    this.sceneVbo = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.sceneVbo);
+    gl.bufferData(gl.ARRAY_BUFFER, data, gl.STATIC_DRAW);
+    this.sceneVertCount = data.length / 9;
+  }
+
+  setupAttribs() {
+    const gl = this.gl;
+    const stride = 36;
+    gl.enableVertexAttribArray(this.loc.aPos);
+    gl.vertexAttribPointer(this.loc.aPos, 3, gl.FLOAT, false, stride, 0);
+    gl.enableVertexAttribArray(this.loc.aNorm);
+    gl.vertexAttribPointer(this.loc.aNorm, 3, gl.FLOAT, false, stride, 12);
+    gl.enableVertexAttribArray(this.loc.aCol);
+    gl.vertexAttribPointer(this.loc.aCol, 3, gl.FLOAT, false, stride, 24);
   }
 
   buildViewMatrix() {
+    const bobY = this.bobActive ? Math.sin(this.headBob) * 0.05 : 0;
+    const px = this.camX, py = this.camY + bobY, pz = this.camZ;
     const sy = Math.sin(this.yaw), cy = Math.cos(this.yaw);
     const sp = Math.sin(this.pitch), cp = Math.cos(this.pitch);
     const fx = sy * cp, fy = -sp, fz = -cy * cp;
-    const rx = -cy * cp, ry = 0, rz = -sy * cp;
-    const ux = sy * sp, uy = cp, uz = -cy * sp;
-    const px = this.camX, py = this.camY, pz = this.camZ;
-    const v = new Float32Array(16);
-    v[0] = rx; v[1] = ux; v[2] = -fx; v[3] = 0;
-    v[4] = ry; v[5] = uy; v[6] = -fy; v[7] = 0;
-    v[8] = rz; v[9] = uz; v[10] = -fz; v[11] = 0;
-    v[12] = -(rx * px + ry * py + rz * pz);
-    v[13] = -(ux * px + uy * py + uz * pz);
-    v[14] = fx * px + fy * py + fz * pz;
-    v[15] = 1;
-    return v;
+    const rx = cy, ry = 0, rz = sy;
+    const ux = -sy * sp, uy = cp, uz = cy * sp;
+    const m = new Float32Array(16);
+    m[0] = rx;  m[1] = ux;  m[2] = -fx; m[3] = 0;
+    m[4] = ry;  m[5] = uy;  m[6] = -fy; m[7] = 0;
+    m[8] = rz;  m[9] = uz;  m[10] = -fz; m[11] = 0;
+    m[12] = -(rx * px + ry * py + rz * pz);
+    m[13] = -(ux * px + uy * py + uz * pz);
+    m[14] = fx * px + fy * py + fz * pz;
+    m[15] = 1;
+    return m;
   }
 
   buildProjMatrix() {
-    const fov = (60 * Math.PI) / 180, aspect = this.canvas.width / this.canvas.height, near = 0.1, far = 100;
+    const fov = (70 * Math.PI) / 180;
+    const aspect = this.canvas.width / this.canvas.height;
+    const near = 0.1, far = 80;
     const f = 1 / Math.tan(fov / 2);
     const p = new Float32Array(16);
-    p[0] = f / aspect; p[5] = f; p[10] = (far + near) / (near - far); p[11] = -1;
+    p[0] = f / aspect;
+    p[5] = f;
+    p[10] = (far + near) / (near - far);
+    p[11] = -1;
     p[14] = (2 * far * near) / (near - far);
     return p;
   }
 
-  draw() {
-    this.ensureGl();
-    if (!this.gl || !this.program || !this.buffers) return;
+  buildOrtho() {
+    const w = this.canvas.width, h = this.canvas.height;
+    const m = new Float32Array(16);
+    m[0] = 2 / w; m[5] = -2 / h; m[10] = -1;
+    m[12] = -1; m[13] = 1; m[15] = 1;
+    return m;
+  }
 
-    const gl = this.gl, program = this.program;
+  setUniforms(proj, view) {
+    const gl = this.gl;
+    gl.uniformMatrix4fv(this.loc.proj, false, proj);
+    gl.uniformMatrix4fv(this.loc.view, false, view);
+
+    gl.uniform3f(this.loc.camPos, this.camX, this.camY, this.camZ);
+    gl.uniform1f(this.loc.hud, 0);
+    gl.uniform1f(this.loc.alpha, 1);
+    gl.uniform1f(this.loc.dmg, Math.max(0, this.damageFlash));
+    gl.uniform1f(this.loc.muz, Math.max(0, this.muzzleFlash));
+    gl.uniform3f(this.loc.fogCol, 0.03, 0.04, 0.03);
+    gl.uniform1f(this.loc.fogD, 0.055);
+
+    const lpos = [], lcol = [];
+    const numLights = Math.min(this.lights.length, 12);
+    for (let i = 0; i < 12; i++) {
+      if (i < numLights) {
+        const l = this.lights[i];
+        const flick = 1.0 + Math.sin(this.time * 6 + l.phase) * l.flicker;
+        lpos.push(l.x, l.y, l.z);
+        lcol.push(l.r * flick, l.g * flick, l.b * flick);
+      } else {
+        lpos.push(0, 0, 0);
+        lcol.push(0, 0, 0);
+      }
+    }
+    gl.uniform3fv(this.loc.lp, new Float32Array(lpos));
+    gl.uniform3fv(this.loc.lc, new Float32Array(lcol));
+    gl.uniform1f(this.loc.nl, numLights);
+  }
+
+  draw() {
+    this.initGL();
+    if (!this.gl || !this.program) return;
+    if (!this.sceneVbo) this.rebuildScene();
+
+    const gl = this.gl;
     gl.viewport(0, 0, this.canvas.width, this.canvas.height);
-    gl.clearColor(0.02, 0.02, 0.04, 1);
+    gl.clearColor(0.01, 0.01, 0.02, 1);
     gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+    gl.useProgram(this.program);
 
     const proj = this.buildProjMatrix();
     const view = this.buildViewMatrix();
+    this.setUniforms(proj, view);
 
-    gl.useProgram(program);
-    gl.bindBuffer(gl.ARRAY_BUFFER, this.buffers.vbo);
-    const stride = 24;
-    gl.enableVertexAttribArray(gl.getAttribLocation(program, "aPosition"));
-    gl.vertexAttribPointer(gl.getAttribLocation(program, "aPosition"), 3, gl.FLOAT, false, stride, 0);
-    gl.enableVertexAttribArray(gl.getAttribLocation(program, "aColor"));
-    gl.vertexAttribPointer(gl.getAttribLocation(program, "aColor"), 3, gl.FLOAT, false, stride, 12);
-    gl.uniformMatrix4fv(gl.getUniformLocation(program, "uProjection"), false, proj);
-    gl.uniformMatrix4fv(gl.getUniformLocation(program, "uView"), false, view);
-    gl.drawArrays(gl.TRIANGLES, 0, this.buffers.vertexCount);
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.sceneVbo);
+    this.setupAttribs();
+    gl.drawArrays(gl.TRIANGLES, 0, this.sceneVertCount);
+
+    this.drawEntities(proj, view);
+    this.drawHUD();
+    this.drawOverlayHUD();
+  }
+
+  drawEntities(proj, view) {
+    const gl = this.gl;
+    const v = [];
 
     for (const e of this.enemies) {
-      if (e.hp <= 0) continue;
-      this.drawBox(gl, program, view, proj, e.x, e.y + 0.5, e.z, 0.5, e.color);
+      if (!e.alive) {
+        this.addBox(v, e.x, 0.05, e.z, 0.4, 0.05, 0.4, this.enemyTypes[e.type].col.map((c) => c * 0.4));
+        continue;
+      }
+      const et = this.enemyTypes[e.type];
+      const fOff = e.flinch > 0 ? (Math.random() - 0.5) * 0.1 : 0;
+      const sz = et.sz;
+
+      this.addBox(v, e.x + fOff, e.y + sz, e.z, sz * 0.8, sz, sz * 0.6, et.col);
+
+      const hc = et.col.map((c) => Math.min(1, c + 0.15));
+      this.addBox(v, e.x + fOff, e.y + sz * 2 + sz * 0.35, e.z, sz * 0.5, sz * 0.4, sz * 0.5, hc);
+
+      const ec = [1, 0.3, 0.1];
+      this.addBox(v, e.x + fOff + sz * 0.2, e.y + sz * 2 + sz * 0.4, e.z + sz * 0.45, 0.05, 0.05, 0.05, ec);
+      this.addBox(v, e.x + fOff - sz * 0.2, e.y + sz * 2 + sz * 0.4, e.z + sz * 0.45, 0.05, 0.05, 0.05, ec);
+
       if (e.hp < e.maxHp) {
         const t = e.hp / e.maxHp;
-        const barY = e.y + 1.1;
-        const verts = [];
-        this.addQuad(verts, [e.x - 0.3, barY, e.z + 0.26], [e.x + 0.3, barY, e.z + 0.26], [e.x + 0.3, barY + 0.06, e.z + 0.26], [e.x - 0.3, barY + 0.06, e.z + 0.26], [0.2, 0.2, 0.2]);
-        this.addQuad(verts, [e.x - 0.28, barY + 0.02, e.z + 0.27], [e.x - 0.28 + 0.56 * t, barY + 0.02, e.z + 0.27], [e.x - 0.28 + 0.56 * t, barY + 0.04, e.z + 0.27], [e.x - 0.28, barY + 0.04, e.z + 0.27], [0.2, 0.9, 0.2]);
-        const vbo = gl.createBuffer();
-        gl.bindBuffer(gl.ARRAY_BUFFER, vbo);
-        gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(verts), gl.STATIC_DRAW);
-        gl.vertexAttribPointer(gl.getAttribLocation(program, "aPosition"), 3, gl.FLOAT, false, 24, 0);
-        gl.vertexAttribPointer(gl.getAttribLocation(program, "aColor"), 3, gl.FLOAT, false, 24, 12);
-        gl.drawArrays(gl.TRIANGLES, 0, verts.length / 6);
-        gl.deleteBuffer(vbo);
+        const barY = e.y + sz * 2 + sz * 0.9;
+        const barW = 0.5;
+        this.addBox(v, e.x, barY, e.z + sz * 0.6, barW, 0.03, 0.01, [0.15, 0.15, 0.15]);
+        this.addBox(v, e.x - barW * (1 - t), barY, e.z + sz * 0.61, barW * t, 0.025, 0.01, [0.1, 0.9, 0.1]);
       }
     }
 
     for (const p of this.pickups) {
       if (p.collected) continue;
-      if (p.type === "health") this.drawBox(gl, program, view, proj, p.x, p.y + 0.2, p.z, 0.35, [0.2, 0.85, 0.3]);
-      if (p.type === "weapon") this.drawBox(gl, program, view, proj, p.x, p.y + 0.25, p.z, 0.3, [0.85, 0.7, 0.2]);
+      const bob = Math.sin(this.time * 3 + p.x + p.z) * 0.08;
+      const spin = this.time * 2;
+      const sz = 0.18;
+      if (p.type === "health") this.addBox(v, p.x, p.y + bob, p.z, sz, sz, sz, [0.2, 0.85, 0.3]);
+      else if (p.type === "armor") this.addBox(v, p.x, p.y + bob, p.z, sz, sz, sz, [0.3, 0.5, 0.95]);
+      else if (p.type === "ammo") this.addBox(v, p.x, p.y + bob, p.z, sz, sz, sz, [0.9, 0.8, 0.2]);
+      else if (p.type === "weapon") this.addBox(v, p.x, p.y + bob, p.z, sz * 1.3, sz, sz * 0.8, [0.95, 0.6, 0.15]);
     }
 
+    for (const pr of this.projectiles) {
+      this.addBox(v, pr.x, pr.y, pr.z, 0.1, 0.1, 0.1, pr.col);
+    }
+
+    if (v.length === 0) return;
+    if (!this.dynVbo) this.dynVbo = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.dynVbo);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(v), gl.DYNAMIC_DRAW);
+    this.setupAttribs();
+    gl.drawArrays(gl.TRIANGLES, 0, v.length / 9);
+  }
+
+  drawHUD() {
+    const gl = this.gl;
+    const w = this.canvas.width, h = this.canvas.height;
+    const v = [];
+
     gl.disable(gl.DEPTH_TEST);
-    const ortho = new Float32Array(16);
-    ortho[0] = 2 / this.canvas.width; ortho[5] = -2 / this.canvas.height; ortho[10] = -1; ortho[12] = -1; ortho[13] = 1; ortho[15] = 1;
+    gl.enable(gl.BLEND);
+    gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+
+    const ortho = this.buildOrtho();
     const identity = new Float32Array(16);
     identity[0] = identity[5] = identity[10] = identity[15] = 1;
-    gl.uniformMatrix4fv(gl.getUniformLocation(program, "uProjection"), false, ortho);
-    gl.uniformMatrix4fv(gl.getUniformLocation(program, "uView"), false, identity);
+    gl.uniformMatrix4fv(this.loc.proj, false, ortho);
+    gl.uniformMatrix4fv(this.loc.view, false, identity);
+    gl.uniform1f(this.loc.hud, 1);
+    gl.uniform1f(this.loc.alpha, 1);
 
-    const barW = 200, barH = 18, margin = 20;
-    const hudVerts = [];
-    this.addQuad(hudVerts, [margin, this.canvas.height - margin - barH, 0], [margin + barW, this.canvas.height - margin - barH, 0], [margin + barW, this.canvas.height - margin, 0], [margin, this.canvas.height - margin, 0], [0.15, 0.15, 0.15]);
-    const fillW = (this.playerHp / this.maxHp) * (barW - 4);
-    this.addQuad(hudVerts, [margin + 2, this.canvas.height - margin - barH + 2, 0], [margin + 2 + fillW, this.canvas.height - margin - barH + 2, 0], [margin + 2 + fillW, this.canvas.height - margin - 2, 0], [margin + 2, this.canvas.height - margin - 2, 0], [0.85, 0.2, 0.2]);
-    const hudVbo = gl.createBuffer();
-    gl.bindBuffer(gl.ARRAY_BUFFER, hudVbo);
-    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(hudVerts), gl.STATIC_DRAW);
-    gl.vertexAttribPointer(gl.getAttribLocation(program, "aPosition"), 3, gl.FLOAT, false, 24, 0);
-    gl.vertexAttribPointer(gl.getAttribLocation(program, "aColor"), 3, gl.FLOAT, false, 24, 12);
-    gl.drawArrays(gl.TRIANGLES, 0, hudVerts.length / 6);
-    gl.deleteBuffer(hudVbo);
+    const cs = 12;
+    this.addHudQuad(v, w / 2 - cs, h / 2 - 1.5, w / 2 + cs, h / 2 + 1.5, [0.9, 0.9, 0.9]);
+    this.addHudQuad(v, w / 2 - 1.5, h / 2 - cs, w / 2 + 1.5, h / 2 + cs, [0.9, 0.9, 0.9]);
 
-    const crossSize = 4;
-    const cV = [];
-    this.addQuad(cV, [this.canvas.width / 2 - crossSize, this.canvas.height / 2 - 1, 0], [this.canvas.width / 2 + crossSize, this.canvas.height / 2 - 1, 0], [this.canvas.width / 2 + crossSize, this.canvas.height / 2 + 1, 0], [this.canvas.width / 2 - crossSize, this.canvas.height / 2 + 1, 0], [1, 1, 1]);
-    this.addQuad(cV, [this.canvas.width / 2 - 1, this.canvas.height / 2 - crossSize, 0], [this.canvas.width / 2 + 1, this.canvas.height / 2 - crossSize, 0], [this.canvas.width / 2 + 1, this.canvas.height / 2 + crossSize, 0], [this.canvas.width / 2 - 1, this.canvas.height / 2 + crossSize, 0], [1, 1, 1]);
-    const cVbo = gl.createBuffer();
-    gl.bindBuffer(gl.ARRAY_BUFFER, cVbo);
-    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(cV), gl.STATIC_DRAW);
-    gl.vertexAttribPointer(gl.getAttribLocation(program, "aPosition"), 3, gl.FLOAT, false, 24, 0);
-    gl.vertexAttribPointer(gl.getAttribLocation(program, "aColor"), 3, gl.FLOAT, false, 24, 12);
-    gl.drawArrays(gl.TRIANGLES, 0, cV.length / 6);
-    gl.deleteBuffer(cVbo);
+    const barH = 8, barW = 140, margin = 16;
+    const barY = h - margin - 60;
 
+    this.addHudQuad(v, margin, barY, margin + barW, barY + barH, [0.15, 0.08, 0.08]);
+    const hpW = (this.hp / this.maxHp) * barW;
+    this.addHudQuad(v, margin, barY, margin + hpW, barY + barH, [0.85, 0.15, 0.15]);
+
+    this.addHudQuad(v, margin, barY + 14, margin + barW, barY + 14 + barH, [0.08, 0.08, 0.15]);
+    const arW = (this.armor / this.maxArmor) * barW;
+    this.addHudQuad(v, margin, barY + 14, margin + arW, barY + 14 + barH, [0.2, 0.4, 0.9]);
+
+    this.addHudQuad(v, w - margin - barW, barY, w - margin, barY + barH, [0.15, 0.12, 0.05]);
+    const amW = (this.ammo / this.maxAmmo) * barW;
+    this.addHudQuad(v, w - margin - barW, barY, w - margin - barW + amW, barY + barH, [0.9, 0.75, 0.15]);
+
+    const bobX = this.bobActive ? Math.sin(this.headBob * 0.5) * 6 : 0;
+    const bobY = this.bobActive ? Math.abs(Math.cos(this.headBob)) * 4 : 0;
+    const kickY = Math.max(0, this.weaponKick) * 30;
+    const bx = w * 0.7 + bobX, by = h - 20 + bobY + kickY;
+
+    const shapes = [
+      [
+        { dx: -20, dy: -50, dw: 18, dh: 35, c: [0.85, 0.65, 0.5] },
+        { dx: 10, dy: -42, dw: 18, dh: 35, c: [0.85, 0.65, 0.5] },
+      ],
+      [
+        { dx: -8, dy: -90, dw: 16, dh: 55, c: [0.35, 0.35, 0.4] },
+        { dx: -12, dy: -35, dw: 24, dh: 42, c: [0.22, 0.2, 0.18] },
+        { dx: -5, dy: -95, dw: 10, dh: 8, c: [0.55, 0.55, 0.6] },
+      ],
+      [
+        { dx: -18, dy: -115, dw: 36, dh: 70, c: [0.32, 0.32, 0.36] },
+        { dx: -10, dy: -45, dw: 20, dh: 52, c: [0.4, 0.25, 0.15] },
+        { dx: -22, dy: -82, dw: 44, dh: 12, c: [0.48, 0.48, 0.52] },
+      ],
+      [
+        { dx: -24, dy: -125, dw: 10, dh: 85, c: [0.36, 0.36, 0.4] },
+        { dx: -6, dy: -125, dw: 10, dh: 85, c: [0.36, 0.36, 0.4] },
+        { dx: 12, dy: -125, dw: 10, dh: 85, c: [0.36, 0.36, 0.4] },
+        { dx: -14, dy: -40, dw: 30, dh: 48, c: [0.24, 0.24, 0.28] },
+      ],
+    ];
+
+    const wpnParts = shapes[this.wpnIdx] || shapes[1];
+    for (const p of wpnParts) {
+      this.addHudQuad(v, bx + p.dx, by + p.dy, bx + p.dx + p.dw, by + p.dy + p.dh, p.c);
+    }
+
+    if (this.muzzleFlash > 0.2) {
+      const fs = 15 * this.muzzleFlash;
+      const fy = by - 100;
+      this.addHudQuad(v, bx - fs, fy - fs, bx + fs, fy + fs, [1, 0.9, 0.4]);
+    }
+
+    if (!this.hudVbo) this.hudVbo = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.hudVbo);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(v), gl.DYNAMIC_DRAW);
+    this.setupAttribs();
+    gl.drawArrays(gl.TRIANGLES, 0, v.length / 9);
+
+    if (this.damageFlash > 0) {
+      const dv = [];
+      this.addHudQuad(dv, 0, 0, w, h, [0.8, 0, 0]);
+      gl.uniform1f(this.loc.alpha, this.damageFlash * 0.35);
+      gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(dv), gl.DYNAMIC_DRAW);
+      this.setupAttribs();
+      gl.drawArrays(gl.TRIANGLES, 0, dv.length / 9);
+      gl.uniform1f(this.loc.alpha, 1);
+    }
+
+    gl.disable(gl.BLEND);
     gl.enable(gl.DEPTH_TEST);
+  }
+
+  drawOverlayHUD() {
+    if (!this.hudOverlay) {
+      this.hudOverlay = document.createElement("canvas");
+      this.hudOverlay.width = this.canvas.width;
+      this.hudOverlay.height = this.canvas.height;
+      Object.assign(this.hudOverlay.style, {
+        position: "absolute", top: "0", left: "0",
+        width: "100%", height: "100%",
+        pointerEvents: "none", zIndex: "1",
+      });
+      this.canvas.parentElement.appendChild(this.hudOverlay);
+      this.hudCtx = this.hudOverlay.getContext("2d");
+    }
+
+    const ctx = this.hudCtx;
+    const w = this.hudOverlay.width, h = this.hudOverlay.height;
+    ctx.clearRect(0, 0, w, h);
+
+    const barY = h - 76;
+
+    ctx.font = "bold 11px monospace";
+    ctx.textBaseline = "top";
+    ctx.textAlign = "left";
+
+    ctx.fillStyle = "#ef4444";
+    ctx.fillText("HEALTH", 16, barY - 14);
+    ctx.font = "bold 22px monospace";
+    ctx.fillText(`${Math.round(this.hp)}`, 16, barY + 10);
+
+    ctx.font = "bold 11px monospace";
+    ctx.fillStyle = "#60a5fa";
+    ctx.fillText("ARMOR", 16, barY + 14 - 14 + 12);
+    ctx.font = "bold 14px monospace";
+    ctx.fillText(`${Math.round(this.armor)}`, 16, barY + 14 + 10 + 10);
+
+    ctx.textAlign = "right";
+    ctx.font = "bold 11px monospace";
+    ctx.fillStyle = "#fbbf24";
+    ctx.fillText("AMMO", w - 16, barY - 14);
+    ctx.font = "bold 22px monospace";
+    ctx.fillText(`${this.ammo}`, w - 16, barY + 10);
+
+    ctx.textAlign = "center";
+    ctx.font = "bold 11px monospace";
+    ctx.fillStyle = "#e2e8f0";
+    const wpn = this.weapons[this.wpnIdx];
+    ctx.fillText(wpn.name.toUpperCase(), w / 2, h - 22);
+
+    ctx.font = "bold 12px monospace";
+    ctx.fillStyle = "#94a3b8";
+    ctx.fillText(`KILLS: ${this.kills}/${this.totalEnemies}`, w / 2, h - 8);
+
+    if (this.gameOver) {
+      ctx.fillStyle = "rgba(120, 0, 0, 0.6)";
+      ctx.fillRect(0, 0, w, h);
+      ctx.fillStyle = "#ef4444";
+      ctx.font = "bold 42px sans-serif";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText("YOU DIED", w / 2, h / 2 - 20);
+      ctx.fillStyle = "#94a3b8";
+      ctx.font = "18px sans-serif";
+      ctx.fillText("Click or SPACE to restart", w / 2, h / 2 + 25);
+    }
+
+    if (this.levelComplete) {
+      ctx.fillStyle = "rgba(0, 60, 0, 0.5)";
+      ctx.fillRect(0, 0, w, h);
+      ctx.fillStyle = "#4ade80";
+      ctx.font = "bold 36px sans-serif";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText("LEVEL COMPLETE", w / 2, h / 2 - 20);
+      ctx.fillStyle = "#e2e8f0";
+      ctx.font = "18px sans-serif";
+      ctx.fillText("All enemies eliminated!", w / 2, h / 2 + 20);
+      ctx.fillStyle = "#94a3b8";
+      ctx.font = "16px sans-serif";
+      ctx.fillText("Click or SPACE to restart", w / 2, h / 2 + 50);
+    }
   }
 }

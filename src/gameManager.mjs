@@ -7,6 +7,9 @@ import { RaycasterGame } from "./games/raycaster.mjs";
 import { Doom3DGame } from "./games/doom3d.mjs";
 import { ChessGame } from "./games/chess.mjs";
 import { BreakoutGame } from "./games/breakout.mjs";
+import { AngryBirdGame } from "./games/angryBird.mjs";
+import { TetrisGame } from "./games/tetris.mjs";
+import { MarioGame } from "./games/mario.mjs";
 
 export class GameManager {
   constructor(canvas, statusEl) {
@@ -147,6 +150,30 @@ export class GameManager {
           this.setStatus.bind(this)
         );
         break;
+      case "angrybird":
+        this.ctx = this.canvas.getContext("2d");
+        this.currentGame = new AngryBirdGame(
+          this.canvas,
+          this.ctx,
+          this.setStatus.bind(this)
+        );
+        break;
+      case "tetris":
+        this.ctx = this.canvas.getContext("2d");
+        this.currentGame = new TetrisGame(
+          this.canvas,
+          this.ctx,
+          this.setStatus.bind(this)
+        );
+        break;
+      case "mario":
+        this.ctx = this.canvas.getContext("2d");
+        this.currentGame = new MarioGame(
+          this.canvas,
+          this.ctx,
+          this.setStatus.bind(this)
+        );
+        break;
       default:
         throw new Error(`Unknown game id: ${id}`);
     }
@@ -159,6 +186,7 @@ export class GameManager {
 
   stopGame() {
     this.running = false;
+    if (this.currentGame?.cleanup) this.currentGame.cleanup();
     this.currentGame = null;
     this.clear();
     this.setStatus("");
